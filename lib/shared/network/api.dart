@@ -29,5 +29,8 @@ class API {
   static const String workflows = '/workflows/template/';
   // Document Revision Endpoints
   static const String documentRevisions = '/manager/document/revision/';
+  // comment Endpoints
+  static const String comments = '/manager/comment/';
+
 
 }

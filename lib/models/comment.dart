@@ -21,6 +21,32 @@ class Comment extends Equatable {
     this.replies = const [],
   });
 
+  factory Comment.fromJson(Map<String, dynamic> json) {
+    return Comment(
+      id: json['id'],
+      documentId: json['document_id'],
+      content: json['content'],
+      userId: json['user_id'],
+      userName: json['user_name'],
+      userAvatar: json['user_avatar'],
+      createdAt: DateTime.parse(json['created_at']),
+      replies: json['replies'] != null
+          ? (json['replies'] as List).map((e) => Comment.fromJson(e)).toList()
+          : [],
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'document_id': documentId,
+    'content': content,
+    'user_id': userId,
+    'user_name': userName,
+    'user_avatar': userAvatar,
+    'created_at': createdAt.toIso8601String(),
+    'replies': replies.map((e) => e.toJson()).toList(),
+  };
+
   Comment copyWith({
     String? id,
     String? documentId,
