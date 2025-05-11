@@ -12,6 +12,19 @@ class LoadBackups extends BackupEvent {
   const LoadBackups();
 }
 
+class GetBackupsByDocument extends BackupEvent {
+  final String documentId;
+  
+  const GetBackupsByDocument({required this.documentId});
+  
+  @override
+  List<Object?> get props => [documentId];
+}
+
+class GetAllBackups extends BackupEvent {
+  const GetAllBackups();
+}
+
 class LoadBackup extends BackupEvent {
   final String id;
   
@@ -22,13 +35,18 @@ class LoadBackup extends BackupEvent {
 }
 
 class CreateBackup extends BackupEvent {
-  const CreateBackup();
+  final String documentId;
+  
+  const CreateBackup({required this.documentId});
+  
+  @override
+  List<Object?> get props => [documentId];
 }
 
 class RestoreBackup extends BackupEvent {
   final String id;
   
-  const RestoreBackup(this.id);
+  const RestoreBackup({required this.id});
   
   @override
   List<Object?> get props => [id];
@@ -37,7 +55,7 @@ class RestoreBackup extends BackupEvent {
 class DeleteBackup extends BackupEvent {
   final String id;
   
-  const DeleteBackup(this.id);
+  const DeleteBackup({required this.id});
   
   @override
   List<Object?> get props => [id];

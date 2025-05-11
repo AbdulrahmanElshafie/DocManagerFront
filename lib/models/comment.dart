@@ -8,6 +8,7 @@ class Comment extends Equatable {
   final String userName;
   final String? userAvatar;
   final DateTime createdAt;
+  final DateTime? updatedAt;
   final List<Comment> replies;
 
   const Comment({
@@ -15,9 +16,10 @@ class Comment extends Equatable {
     required this.documentId,
     required this.content,
     required this.userId,
-    required this.userName,
+    this.userName = 'User', // Make optional with default value
     this.userAvatar,
     required this.createdAt,
+    this.updatedAt,
     this.replies = const [],
   });
 
@@ -27,9 +29,10 @@ class Comment extends Equatable {
       documentId: json['document_id'],
       content: json['content'],
       userId: json['user_id'],
-      userName: json['user_name'],
+      userName: json['user_name'] ?? 'User', // Handle missing user name
       userAvatar: json['user_avatar'],
       createdAt: DateTime.parse(json['created_at']),
+      updatedAt: json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null,
       replies: json['replies'] != null
           ? (json['replies'] as List).map((e) => Comment.fromJson(e)).toList()
           : [],
@@ -44,6 +47,7 @@ class Comment extends Equatable {
     'user_name': userName,
     'user_avatar': userAvatar,
     'created_at': createdAt.toIso8601String(),
+    'updated_at': updatedAt?.toIso8601String(),
     'replies': replies.map((e) => e.toJson()).toList(),
   };
 
@@ -55,6 +59,7 @@ class Comment extends Equatable {
     String? userName,
     String? userAvatar,
     DateTime? createdAt,
+    DateTime? updatedAt,
     List<Comment>? replies,
   }) {
     return Comment(
@@ -65,6 +70,7 @@ class Comment extends Equatable {
       userName: userName ?? this.userName,
       userAvatar: userAvatar ?? this.userAvatar,
       createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
       replies: replies ?? this.replies,
     );
   }
@@ -78,6 +84,7 @@ class Comment extends Equatable {
         userName,
         userAvatar,
         createdAt,
+        updatedAt,
         replies,
       ];
 } 

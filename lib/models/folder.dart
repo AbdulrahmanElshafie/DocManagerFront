@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'dart:developer' as developer;
 
 class Folder extends Equatable {
   final String id;
@@ -21,26 +22,77 @@ class Folder extends Equatable {
     required this.folderIds,
   });
 
-  factory Folder.fromJson(Map<String, dynamic> json) => Folder(
-    id: json['id'],
-    name: json['name'],
-    parentId: json['parent'],
-    ownerId: json['owner'],
-    createdAt: DateTime.parse(json['created_at']),
-    documentIds: List<String>.from(json['documentIds'] ?? []),
-    lastModified: DateTime.parse(json['updated_at']),
-    folderIds: List<String>.from(json['folderIds'] ?? []),
-  );
+  factory Folder.fromJson(Map<String, dynamic> json) {
+    developer.log('Parsing folder JSON: $json', name: 'Folder.fromJson');
+    
+    // Parse nested document and folder lists if they exist
+    List<String> documentIds = [];
+    List<String> folderIds = [];
+    
+    // API provides 'documents' and 'folders' as string values that need parsing
+    if (json['documents'] != null) {
+      if (json['documents'] is List) {
+        try {
+          documentIds = (json['documents'] as List)
+              .map((doc) => doc is Map<String, dynamic> ? doc['id'].toString() : doc.toString())
+              .toList();
+        } catch (e) {
+          developer.log('Error parsing documentIds from list: $e', name: 'Folder.fromJson');
+        }
+      } else if (json['documents'] is String) {
+        try {
+          final docString = json['documents'] as String;
+          if (docString.isNotEmpty) {
+            documentIds = docString.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+          }
+        } catch (e) {
+          developer.log('Error parsing documentIds from string: $e', name: 'Folder.fromJson');
+        }
+      }
+    }
+    
+    if (json['folders'] != null) {
+      if (json['folders'] is List) {
+        try {
+          folderIds = (json['folders'] as List)
+              .map((folder) => folder is Map<String, dynamic> ? folder['id'].toString() : folder.toString())
+              .toList();
+        } catch (e) {
+          developer.log('Error parsing folderIds from list: $e', name: 'Folder.fromJson');
+        }
+      } else if (json['folders'] is String) {
+        try {
+          final folderString = json['folders'] as String;
+          if (folderString.isNotEmpty) {
+            folderIds = folderString.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+          }
+        } catch (e) {
+          developer.log('Error parsing folderIds from string: $e', name: 'Folder.fromJson');
+        }
+      }
+    }
+    
+    return Folder(
+      id: json['id'] ?? '',
+      name: json['name'] ?? '',
+      parentId: json['parent'],
+      ownerId: json['owner'] ?? '',
+      createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
+      lastModified: json['updated_at'] != null ? DateTime.parse(json['updated_at']) : DateTime.now(),
+      documentIds: documentIds,
+      folderIds: folderIds,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
-    'parentId': parentId,
-    'ownerId': ownerId,
-    'createdAt': createdAt.toIso8601String(),
-    'documentIds': documentIds,
-    'lastModified': lastModified.toIso8601String(),
-    'folderIds': folderIds
+    'parent': parentId,
+    'owner': ownerId,
+    'created_at': createdAt.toIso8601String(),
+    'updated_at': lastModified.toIso8601String(),
+    'documents': documentIds,
+    'folders': folderIds
   };
 
   Folder copyWith({

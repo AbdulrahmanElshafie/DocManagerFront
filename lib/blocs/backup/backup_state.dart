@@ -65,10 +65,10 @@ class BackupDeleted extends BackupState {
   List<Object?> get props => [result];
 }
 
-class BackupOperationSuccess extends BackupState {
+class BackupSuccess extends BackupState {
   final String message;
   
-  const BackupOperationSuccess(this.message);
+  const BackupSuccess(this.message);
   
   @override
   List<Object?> get props => [message];

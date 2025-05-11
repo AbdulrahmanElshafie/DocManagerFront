@@ -12,6 +12,15 @@ class LoadShareableLinks extends ShareableLinkEvent {
   const LoadShareableLinks();
 }
 
+class GetShareableLinks extends ShareableLinkEvent {
+  final String resourceId;
+  
+  const GetShareableLinks({required this.resourceId});
+  
+  @override
+  List<Object?> get props => [resourceId];
+}
+
 class LoadShareableLink extends ShareableLinkEvent {
   final String token;
   
@@ -24,14 +33,18 @@ class LoadShareableLink extends ShareableLinkEvent {
 class CreateShareableLink extends ShareableLinkEvent {
   final String? documentId;
   final DateTime? expiresAt;
+  final String? resourceId;
+  final String? permissionType;
   
   const CreateShareableLink({
     this.documentId,
-    this.expiresAt
+    this.expiresAt,
+    this.resourceId,
+    this.permissionType,
   });
   
   @override
-  List<Object?> get props => [documentId, expiresAt];
+  List<Object?> get props => [documentId, expiresAt, resourceId, permissionType];
 }
 
 class UpdateShareableLink extends ShareableLinkEvent {
@@ -54,7 +67,7 @@ class UpdateShareableLink extends ShareableLinkEvent {
 class DeleteShareableLink extends ShareableLinkEvent {
   final String id;
   
-  const DeleteShareableLink(this.id);
+  const DeleteShareableLink({required this.id});
   
   @override
   List<Object?> get props => [id];

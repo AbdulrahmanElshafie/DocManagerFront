@@ -11,6 +11,7 @@ class CommentBloc extends Bloc<CommentEvent, CommentState> {
       : _commentRepository = commentRepository,
         super(const CommentInitial()) {
     on<LoadComments>(_onLoadComments);
+    on<GetComments>(_onGetComments);
     on<LoadComment>(_onLoadComment);
     on<CreateComment>(_onCreateComment);
     on<UpdateComment>(_onUpdateComment);
@@ -27,12 +28,27 @@ class CommentBloc extends Bloc<CommentEvent, CommentState> {
       emit(CommentError('Failed to load comments: $error'));
     }
   }
+  
+  Future<void> _onGetComments(GetComments event, Emitter<CommentState> emit) async {
+    try {
+      emit(const CommentsLoading());
+      final comments = await _commentRepository.getComments(event.documentId);
+      emit(CommentsLoaded(comments));
+    } catch (error) {
+      LoggerUtil.error('Failed to load comments: $error');
+      emit(CommentError('Failed to load comments: $error'));
+    }
+  }
 
   Future<void> _onLoadComment(LoadComment event, Emitter<CommentState> emit) async {
     try {
       emit(const CommentLoading());
       final comment = await _commentRepository.getComment(event.id);
-      emit(CommentLoaded(comment));
+      if (comment != null) {
+        emit(CommentLoaded(comment));
+      } else {
+        emit(CommentError('Comment not found'));
+      }
     } catch (error) {
       LoggerUtil.error('Failed to load comment: $error');
       emit(CommentError('Failed to load comment: $error'));
@@ -45,7 +61,7 @@ class CommentBloc extends Bloc<CommentEvent, CommentState> {
       final comment = await _commentRepository.createComment(
         event.documentId, 
         event.content,
-        event.userId
+        event.userId ?? ""
       );
       emit(CommentCreated(comment));
       emit(const CommentOperationSuccess('Comment created successfully'));

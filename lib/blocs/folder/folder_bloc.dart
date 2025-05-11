@@ -3,6 +3,7 @@ import 'package:doc_manager/blocs/folder/folder_event.dart';
 import 'package:doc_manager/blocs/folder/folder_state.dart';
 import 'package:doc_manager/repository/folder_repository.dart';
 import 'package:doc_manager/shared/utils/logger.dart';
+import 'dart:developer' as developer;
 
 class FolderBloc extends Bloc<FolderEvent, FolderState> {
   final FolderRepository _folderRepository;
@@ -11,6 +12,8 @@ class FolderBloc extends Bloc<FolderEvent, FolderState> {
       : _folderRepository = folderRepository,
         super(const FolderInitial()) {
     on<LoadFolders>(_onLoadFolders);
+    on<GetFolders>(_onGetFolders);
+    on<SearchFolders>(_onSearchFolders);
     on<LoadFolder>(_onLoadFolder);
     on<CreateFolder>(_onCreateFolder);
     on<UpdateFolder>(_onUpdateFolder);
@@ -21,10 +24,35 @@ class FolderBloc extends Bloc<FolderEvent, FolderState> {
     try {
       emit(const FoldersLoading());
       final folders = await _folderRepository.getFolders();
+      developer.log('Loaded ${folders.length} folders', name: 'FolderBloc');
       emit(FoldersLoaded(folders));
     } catch (error) {
       LoggerUtil.error('Failed to load folders: $error');
       emit(FolderError('Failed to load folders: $error'));
+    }
+  }
+  
+  Future<void> _onGetFolders(GetFolders event, Emitter<FolderState> emit) async {
+    try {
+      emit(const FoldersLoading());
+      final folders = await _folderRepository.getFoldersByParent(event.parentFolderId);
+      developer.log('Loaded ${folders.length} folders by parent', name: 'FolderBloc');
+      emit(FoldersLoaded(folders));
+    } catch (error) {
+      LoggerUtil.error('Failed to load folders: $error');
+      emit(FolderError('Failed to load folders: $error'));
+    }
+  }
+  
+  Future<void> _onSearchFolders(SearchFolders event, Emitter<FolderState> emit) async {
+    try {
+      emit(const FoldersLoading());
+      final folders = await _folderRepository.searchFolders(event.query);
+      developer.log('Found ${folders.length} folders matching search', name: 'FolderBloc');
+      emit(FoldersLoaded(folders));
+    } catch (error) {
+      LoggerUtil.error('Failed to search folders: $error');
+      emit(FolderError('Failed to search folders: $error'));
     }
   }
 
@@ -43,10 +71,15 @@ class FolderBloc extends Bloc<FolderEvent, FolderState> {
     try {
       emit(const FoldersLoading());
       final folder = await _folderRepository.createFolder(
-        event.parentId, 
+        event.parentFolderId, 
         event.name
       );
+      
+      // Re-fetch all folders to update the list
+      final folders = await _folderRepository.getFoldersByParent(event.parentFolderId);
+      
       emit(FolderCreated(folder));
+      emit(FoldersLoaded(folders));
       emit(const FolderOperationSuccess('Folder created successfully'));
     } catch (error) {
       LoggerUtil.error('Failed to create folder: $error');
@@ -62,7 +95,12 @@ class FolderBloc extends Bloc<FolderEvent, FolderState> {
         event.parentId,
         event.name
       );
+      
+      // Re-fetch all folders to update the list
+      final folders = await _folderRepository.getFoldersByParent(event.parentId);
+      
       emit(FolderUpdated(result));
+      emit(FoldersLoaded(folders));
       emit(const FolderOperationSuccess('Folder updated successfully'));
     } catch (error) {
       LoggerUtil.error('Failed to update folder: $error');
@@ -74,7 +112,12 @@ class FolderBloc extends Bloc<FolderEvent, FolderState> {
     try {
       emit(const FoldersLoading());
       final result = await _folderRepository.deleteFolder(event.id);
+      
+      // Re-fetch all folders to update the list
+      final folders = await _folderRepository.getFolders();
+      
       emit(FolderDeleted(result));
+      emit(FoldersLoaded(folders));
       emit(const FolderOperationSuccess('Folder deleted successfully'));
     } catch (error) {
       LoggerUtil.error('Failed to delete folder: $error');

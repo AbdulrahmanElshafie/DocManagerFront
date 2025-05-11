@@ -8,6 +8,15 @@ abstract class VersionEvent extends Equatable {
   List<Object?> get props => [];
 }
 
+class GetVersions extends VersionEvent {
+  final String documentId;
+  
+  const GetVersions({required this.documentId});
+  
+  @override
+  List<Object?> get props => [documentId];
+}
+
 class LoadVersions extends VersionEvent {
   final String documentId;
   

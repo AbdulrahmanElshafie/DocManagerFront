@@ -32,6 +32,8 @@ class FoldersLoaded extends FolderState {
 class FolderLoaded extends FolderState {
   final Folder folder;
   
+  List<Folder> get folders => [folder];
+  
   const FolderLoaded(this.folder);
   
   @override

@@ -11,6 +11,8 @@ class BackupBloc extends Bloc<BackupEvent, BackupState> {
       : _backupRepository = backupRepository,
         super(const BackupInitial()) {
     on<LoadBackups>(_onLoadBackups);
+    on<GetAllBackups>(_onGetAllBackups);
+    on<GetBackupsByDocument>(_onGetBackupsByDocument);
     on<LoadBackup>(_onLoadBackup);
     on<CreateBackup>(_onCreateBackup);
     on<RestoreBackup>(_onRestoreBackup);
@@ -25,6 +27,28 @@ class BackupBloc extends Bloc<BackupEvent, BackupState> {
     } catch (error) {
       LoggerUtil.error('Failed to load backups: $error');
       emit(BackupError('Failed to load backups: $error'));
+    }
+  }
+  
+  Future<void> _onGetAllBackups(GetAllBackups event, Emitter<BackupState> emit) async {
+    try {
+      emit(const BackupsLoading());
+      final backups = await _backupRepository.getBackups();
+      emit(BackupsLoaded(backups));
+    } catch (error) {
+      LoggerUtil.error('Failed to load all backups: $error');
+      emit(BackupError('Failed to load all backups: $error'));
+    }
+  }
+  
+  Future<void> _onGetBackupsByDocument(GetBackupsByDocument event, Emitter<BackupState> emit) async {
+    try {
+      emit(const BackupsLoading());
+      final backups = await _backupRepository.getBackups(documentId: event.documentId);
+      emit(BackupsLoaded(backups));
+    } catch (error) {
+      LoggerUtil.error('Failed to load document backups: $error');
+      emit(BackupError('Failed to load document backups: $error'));
     }
   }
 
@@ -42,9 +66,9 @@ class BackupBloc extends Bloc<BackupEvent, BackupState> {
   Future<void> _onCreateBackup(CreateBackup event, Emitter<BackupState> emit) async {
     try {
       emit(const BackupsLoading());
-      final backup = await _backupRepository.createBackup();
+      final backup = await _backupRepository.createBackup(event.documentId);
       emit(BackupCreated(backup));
-      emit(const BackupOperationSuccess('Backup created successfully'));
+      emit(const BackupSuccess('Backup created successfully'));
     } catch (error) {
       LoggerUtil.error('Failed to create backup: $error');
       emit(BackupError('Failed to create backup: $error'));
@@ -56,7 +80,7 @@ class BackupBloc extends Bloc<BackupEvent, BackupState> {
       emit(const BackupsLoading());
       final result = await _backupRepository.restoreBackup(event.id);
       emit(BackupRestored(result));
-      emit(const BackupOperationSuccess('Backup restored successfully'));
+      emit(const BackupSuccess('Backup restored successfully'));
     } catch (error) {
       LoggerUtil.error('Failed to restore backup: $error');
       emit(BackupError('Failed to restore backup: $error'));
@@ -68,7 +92,7 @@ class BackupBloc extends Bloc<BackupEvent, BackupState> {
       emit(const BackupsLoading());
       final result = await _backupRepository.deleteBackup(event.id);
       emit(BackupDeleted(result));
-      emit(const BackupOperationSuccess('Backup deleted successfully'));
+      emit(const BackupSuccess('Backup deleted successfully'));
     } catch (error) {
       LoggerUtil.error('Failed to delete backup: $error');
       emit(BackupError('Failed to delete backup: $error'));

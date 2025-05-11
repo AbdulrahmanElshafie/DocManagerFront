@@ -74,6 +74,15 @@ class PermissionOperationSuccess extends PermissionState {
   List<Object?> get props => [message];
 }
 
+class PermissionSuccess extends PermissionState {
+  final String message;
+  
+  const PermissionSuccess(this.message);
+  
+  @override
+  List<Object?> get props => [message];
+}
+
 class PermissionError extends PermissionState {
   final String error;
   

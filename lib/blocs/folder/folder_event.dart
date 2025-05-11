@@ -12,6 +12,24 @@ class LoadFolders extends FolderEvent {
   const LoadFolders();
 }
 
+class GetFolders extends FolderEvent {
+  final String? parentFolderId;
+  
+  const GetFolders({this.parentFolderId});
+  
+  @override
+  List<Object?> get props => [parentFolderId];
+}
+
+class SearchFolders extends FolderEvent {
+  final String query;
+  
+  const SearchFolders({required this.query});
+  
+  @override
+  List<Object?> get props => [query];
+}
+
 class LoadFolder extends FolderEvent {
   final String id;
   
@@ -22,16 +40,16 @@ class LoadFolder extends FolderEvent {
 }
 
 class CreateFolder extends FolderEvent {
-  final String parentId;
+  final String? parentFolderId;
   final String name;
   
   const CreateFolder({
-    required this.parentId,
+    this.parentFolderId,
     required this.name
   });
   
   @override
-  List<Object?> get props => [parentId, name];
+  List<Object?> get props => [parentFolderId, name];
 }
 
 class UpdateFolder extends FolderEvent {
@@ -52,7 +70,7 @@ class UpdateFolder extends FolderEvent {
 class DeleteFolder extends FolderEvent {
   final String id;
   
-  const DeleteFolder(this.id);
+  const DeleteFolder({required this.id});
   
   @override
   List<Object?> get props => [id];

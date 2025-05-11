@@ -6,13 +6,15 @@ class Permission extends Equatable {
   final String documentId;
   final String folderId;
   final String level;
+  final String permissionType;
 
   const Permission({
     required this.id,
     required this.userId,
     required this.documentId,
     required this.folderId,
-    required this.level
+    required this.level,
+    required this.permissionType,
   });
 
   factory Permission.fromJson(Map<String, dynamic> json) => Permission(
@@ -21,6 +23,7 @@ class Permission extends Equatable {
     documentId: json['documentId'],
     folderId: json['folderId'],
     level: json['level'],
+    permissionType: json['permissionType'] ?? 'read',
   );
 
   Map<String, dynamic> toJson() => {
@@ -28,7 +31,8 @@ class Permission extends Equatable {
     'userId': userId,
     'documentId': documentId,
     'folderId': folderId,
-    'level': level
+    'level': level,
+    'permissionType': permissionType,
   };
 
   Permission copyWith({
@@ -36,14 +40,16 @@ class Permission extends Equatable {
     String? userId,
     String? documentId,
     String? folderId,
-    String? level
+    String? level,
+    String? permissionType,
   }) {
     return Permission(
         id: id ?? this.id,
         userId: userId ?? this.userId,
         documentId: documentId ?? this.documentId,
         folderId: folderId ?? this.folderId,
-        level: level ?? this.level
+        level: level ?? this.level,
+        permissionType: permissionType ?? this.permissionType,
     );
   }
 
@@ -53,6 +59,7 @@ class Permission extends Equatable {
     userId,
     documentId,
     folderId,
-    level
+    level,
+    permissionType,
   ];
 } 

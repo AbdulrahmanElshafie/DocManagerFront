@@ -8,6 +8,7 @@ class ShareableLink extends Equatable {
   final DateTime expiresAt;
   final bool isActive;
   final String createdBy;
+  final String permissionType;
 
   const ShareableLink({
     required this.id,
@@ -16,27 +17,33 @@ class ShareableLink extends Equatable {
     required this.createdAt,
     required this.expiresAt,
     required this.isActive,
-    required this.createdBy
+    required this.createdBy,
+    required this.permissionType,
   });
+
+  // Alias for expiresAt to fix UI references
+  DateTime get expiryDate => expiresAt;
 
   factory ShareableLink.fromJson(Map<String, dynamic> json) => ShareableLink(
     id: json['id'],
     documentId: json['documentId'],
-      token: json['token'],
+    token: json['token'],
     createdAt: DateTime.parse(json['createdAt']),
     expiresAt: DateTime.parse(json['expiresAt']),
     isActive: json['isActive'],
-    createdBy: json['createdBy']
+    createdBy: json['createdBy'],
+    permissionType: json['permissionType'] ?? 'read',
   );
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'documentId': documentId,
-    'toke': token,
+    'token': token,
     'createdAt': createdAt.toIso8601String(),
     'expiresAt': expiresAt.toIso8601String(),
     'isActive': isActive,
-    'createdBy': createdBy
+    'createdBy': createdBy,
+    'permissionType': permissionType,
   };
 
   ShareableLink copyWith({
@@ -46,7 +53,8 @@ class ShareableLink extends Equatable {
     DateTime? createdAt,
     DateTime? expiresAt,
     bool? isActive,
-    String? createdBy
+    String? createdBy,
+    String? permissionType,
   }) {
     return ShareableLink(
         id: id ?? this.id,
@@ -55,7 +63,8 @@ class ShareableLink extends Equatable {
         createdAt: createdAt ?? this.createdAt,
         expiresAt: expiresAt ?? this.expiresAt,
         isActive: isActive ?? this.isActive,
-        createdBy: createdBy ?? this.createdBy
+        createdBy: createdBy ?? this.createdBy,
+        permissionType: permissionType ?? this.permissionType,
     );
   }
 
@@ -67,6 +76,7 @@ class ShareableLink extends Equatable {
     createdAt,
     expiresAt,
     isActive,
-    createdBy
+    createdBy,
+    permissionType,
   ];
 }

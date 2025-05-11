@@ -12,6 +12,15 @@ class LoadPermissions extends PermissionEvent {
   const LoadPermissions();
 }
 
+class GetPermissions extends PermissionEvent {
+  final String resourceId;
+  
+  const GetPermissions({required this.resourceId});
+  
+  @override
+  List<Object?> get props => [resourceId];
+}
+
 class LoadPermission extends PermissionEvent {
   final String id;
   
@@ -26,16 +35,20 @@ class CreatePermission extends PermissionEvent {
   final String? documentId;
   final String? folderId;
   final String level;
+  final String? resourceId;
+  final String? permissionType;
   
   const CreatePermission({
     required this.userId,
     this.documentId,
     this.folderId,
     required this.level,
+    this.resourceId,
+    this.permissionType,
   });
   
   @override
-  List<Object?> get props => [userId, documentId, folderId, level];
+  List<Object?> get props => [userId, documentId, folderId, level, resourceId, permissionType];
 }
 
 class UpdatePermission extends PermissionEvent {
@@ -44,6 +57,7 @@ class UpdatePermission extends PermissionEvent {
   final String? documentId;
   final String? folderId;
   final String level;
+  final String? permissionType;
   
   const UpdatePermission({
     required this.id,
@@ -51,16 +65,17 @@ class UpdatePermission extends PermissionEvent {
     this.documentId,
     this.folderId,
     required this.level,
+    this.permissionType,
   });
   
   @override
-  List<Object?> get props => [id, userId, documentId, folderId, level];
+  List<Object?> get props => [id, userId, documentId, folderId, level, permissionType];
 }
 
 class DeletePermission extends PermissionEvent {
   final String id;
   
-  const DeletePermission(this.id);
+  const DeletePermission({required this.id});
   
   @override
   List<Object?> get props => [id];

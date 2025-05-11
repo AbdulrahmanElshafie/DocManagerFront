@@ -74,6 +74,15 @@ class ShareableLinkOperationSuccess extends ShareableLinkState {
   List<Object?> get props => [message];
 }
 
+class ShareableLinkSuccess extends ShareableLinkState {
+  final String message;
+  
+  const ShareableLinkSuccess(this.message);
+  
+  @override
+  List<Object?> get props => [message];
+}
+
 class ShareableLinkError extends ShareableLinkState {
   final String error;
   

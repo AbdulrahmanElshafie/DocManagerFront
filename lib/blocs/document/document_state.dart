@@ -38,6 +38,15 @@ class DocumentLoaded extends DocumentState {
   List<Object?> get props => [document];
 }
 
+class DocumentCreated extends DocumentState {
+  final Document document;
+  
+  const DocumentCreated(this.document);
+  
+  @override
+  List<Object?> get props => [document];
+}
+
 class DocumentUpdated extends DocumentState {
   final Map<String, dynamic> result;
   
@@ -51,6 +60,15 @@ class DocumentDeleted extends DocumentState {
   final Map<String, dynamic> result;
   
   const DocumentDeleted(this.result);
+  
+  @override
+  List<Object?> get props => [result];
+}
+
+class DocumentVersionRestored extends DocumentState {
+  final Map<String, dynamic> result;
+  
+  const DocumentVersionRestored(this.result);
   
   @override
   List<Object?> get props => [result];

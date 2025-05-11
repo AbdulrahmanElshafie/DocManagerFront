@@ -10,7 +10,13 @@ abstract class DocumentEvent extends Equatable {
 }
 
 class LoadDocuments extends DocumentEvent {
-  const LoadDocuments();
+  final String? folderId;
+  final String? query;
+  
+  const LoadDocuments({this.folderId, this.query});
+  
+  @override
+  List<Object?> get props => [folderId, query];
 }
 
 class LoadDocument extends DocumentEvent {
@@ -22,13 +28,28 @@ class LoadDocument extends DocumentEvent {
   List<Object?> get props => [id];
 }
 
+class CreateDocument extends DocumentEvent {
+  final String name;
+  final String? folderId;
+  final String? content;
+  
+  const CreateDocument({
+    required this.name,
+    this.folderId,
+    this.content,
+  });
+  
+  @override
+  List<Object?> get props => [name, folderId, content];
+}
+
 class AddDocument extends DocumentEvent {
-  final String folderId;
+  final String? folderId;
   final File file;
   final String name;
   
   const AddDocument({
-    required this.folderId, 
+    this.folderId, 
     required this.file, 
     required this.name
   });
@@ -39,26 +60,42 @@ class AddDocument extends DocumentEvent {
 
 class UpdateDocument extends DocumentEvent {
   final String id;
-  final String folderId;
-  final File file;
-  final String name;
+  final String? folderId;
+  final File? file;
+  final String? name;
+  final String? content;
   
   const UpdateDocument({
     required this.id,
-    required this.folderId, 
-    required this.file, 
-    required this.name
+    this.folderId, 
+    this.file, 
+    this.name,
+    this.content,
   });
   
   @override
-  List<Object?> get props => [id, folderId, file, name];
+  List<Object?> get props => [id, folderId, file, name, content];
 }
 
 class DeleteDocument extends DocumentEvent {
   final String id;
+  final String? folderId;
   
-  const DeleteDocument(this.id);
+  const DeleteDocument(this.id, {this.folderId});
   
   @override
-  List<Object?> get props => [id];
+  List<Object?> get props => [id, folderId];
+}
+
+class RestoreVersion extends DocumentEvent {
+  final String documentId;
+  final String versionId;
+  
+  const RestoreVersion({
+    required this.documentId,
+    required this.versionId,
+  });
+  
+  @override
+  List<Object?> get props => [documentId, versionId];
 } 

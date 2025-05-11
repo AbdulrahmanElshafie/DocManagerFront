@@ -8,6 +8,15 @@ abstract class CommentEvent extends Equatable {
   List<Object?> get props => [];
 }
 
+class GetComments extends CommentEvent {
+  final String documentId;
+  
+  const GetComments({required this.documentId});
+  
+  @override
+  List<Object?> get props => [documentId];
+}
+
 class LoadComments extends CommentEvent {
   final String documentId;
   
@@ -29,12 +38,12 @@ class LoadComment extends CommentEvent {
 class CreateComment extends CommentEvent {
   final String documentId;
   final String content;
-  final String userId;
+  final String? userId; // Make userId optional as the API might determine it from authentication
   
   const CreateComment({
     required this.documentId,
     required this.content,
-    required this.userId
+    this.userId,
   });
   
   @override
