@@ -35,82 +35,132 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
   
   void _createDocument() {
+    final List<String> availableTemplates = [];
+    String? selectedTemplate;
+    
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Create New Document'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _documentNameController,
-              decoration: const InputDecoration(
-                labelText: 'Document Name',
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Create New Document'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _documentNameController,
+                decoration: const InputDecoration(
+                  labelText: 'Document Name',
+                ),
+                autofocus: true,
               ),
-              autofocus: true,
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<DocumentType>(
-              decoration: const InputDecoration(
-                labelText: 'Document Type',
+              const SizedBox(height: 16),
+              DropdownButtonFormField<DocumentType>(
+                decoration: const InputDecoration(
+                  labelText: 'Document Type',
+                ),
+                value: _selectedDocumentType,
+                items: DocumentType.values.map((type) {
+                  return DropdownMenuItem<DocumentType>(
+                    value: type,
+                    child: Text(type.toString().split('.').last.toUpperCase()),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  setState(() {
+                    _selectedDocumentType = value ?? DocumentType.pdf;
+                    
+                    // Update available templates based on selected type
+                    switch (_selectedDocumentType) {
+                      case DocumentType.pdf:
+                        availableTemplates.clear();
+                        availableTemplates.addAll(['Blank', 'Business Letter', 'Invoice', 'Report']);
+                        break;
+                      case DocumentType.docx:
+                        availableTemplates.clear();
+                        availableTemplates.addAll(['Blank', 'Letter', 'Resume', 'Meeting Minutes']);
+                        break;
+                      case DocumentType.csv:
+                        availableTemplates.clear();
+                        availableTemplates.addAll(['Blank', 'Contacts', 'Inventory', 'Financial']);
+                        break;
+                      default:
+                        availableTemplates.clear();
+                        availableTemplates.add('Blank');
+                    }
+                    
+                    // Reset selected template
+                    selectedTemplate = availableTemplates.first;
+                  });
+                },
               ),
-              value: DocumentType.pdf,
-              items: DocumentType.values.map((type) {
-                return DropdownMenuItem<DocumentType>(
-                  value: type,
-                  child: Text(type.toString().split('.').last.toUpperCase()),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedDocumentType = value ?? DocumentType.pdf;
-                });
+              const SizedBox(height: 16),
+              if (availableTemplates.isNotEmpty)
+                DropdownButtonFormField<String>(
+                  decoration: const InputDecoration(
+                    labelText: 'Template',
+                  ),
+                  value: selectedTemplate ?? availableTemplates.first,
+                  items: availableTemplates.map((template) {
+                    return DropdownMenuItem<String>(
+                      value: template,
+                      child: Text(template),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      selectedTemplate = value;
+                    });
+                  },
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                _documentNameController.clear();
+                Navigator.pop(context);
               },
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (_documentNameController.text.isNotEmpty) {
+                  // Create an empty document with the selected type
+                  final newDocument = Document.empty(
+                    name: _documentNameController.text,
+                    type: _selectedDocumentType,
+                    folderId: widget.folderId ?? '',
+                  );
+                  
+                  // Apply template if one was selected
+                  final template = selectedTemplate ?? 'Blank';
+                  
+                  // Close dialog and navigate to document detail screen
+                  Navigator.pop(context);
+                  
+                  // Open the document directly in edit mode
+                  Navigator.push(
+                    context, 
+                    MaterialPageRoute(
+                      builder: (context) => DocumentDetailScreen(
+                        document: newDocument,
+                        isEditing: true,
+                        isNewDocument: true,
+                        initialTemplate: template != 'Blank' ? template : null,
+                      ),
+                    ),
+                  ).then((_) {
+                    // Reload documents when returning from the detail screen
+                    _loadDocuments();
+                  });
+                  
+                  _documentNameController.clear();
+                }
+              },
+              child: const Text('Create'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              _documentNameController.clear();
-              Navigator.pop(context);
-            },
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (_documentNameController.text.isNotEmpty) {
-                // Create an empty document with the selected type
-                final newDocument = Document.empty(
-                  name: _documentNameController.text,
-                  type: _selectedDocumentType,
-                  folderId: widget.folderId ?? '',
-                );
-                
-                // Close dialog and navigate to document detail screen
-                Navigator.pop(context);
-                
-                // Open the document directly in edit mode
-                Navigator.push(
-                  context, 
-                  MaterialPageRoute(
-                    builder: (context) => DocumentDetailScreen(
-                      document: newDocument,
-                      isEditing: true,
-                      isNewDocument: true,
-                    ),
-                  ),
-                ).then((_) {
-                  // Reload documents when returning from the detail screen
-                  _loadDocuments();
-                });
-                
-                _documentNameController.clear();
-              }
-            },
-            child: const Text('Create'),
-          ),
-        ],
       ),
     );
   }
@@ -215,6 +265,28 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
   
   Widget _buildDocumentCard(Document document) {
+    // Get the appropriate icon based on document type
+    IconData iconData;
+    Color iconColor;
+    
+    switch (document.type) {
+      case DocumentType.pdf:
+        iconData = Icons.picture_as_pdf;
+        iconColor = Colors.red.shade700;
+        break;
+      case DocumentType.docx:
+        iconData = Icons.description;
+        iconColor = Colors.blue.shade700;
+        break;
+      case DocumentType.csv:
+        iconData = Icons.table_chart;
+        iconColor = Colors.green.shade700;
+        break;
+      default:
+        iconData = Icons.insert_drive_file;
+        iconColor = Colors.grey.shade700;
+    }
+    
     return Card(
       clipBehavior: Clip.antiAlias,
       elevation: 2,
@@ -231,14 +303,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              color: Colors.blue.shade100,
+              color: Colors.blue.shade50,
               height: 80,
               width: double.infinity,
               child: Center(
                 child: Icon(
-                  Icons.description,
+                  iconData,
                   size: 48,
-                  color: Colors.blue.shade800,
+                  color: iconColor,
                 ),
               ),
             ),
@@ -254,6 +326,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       fontSize: 16,
                     ),
                     overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -261,6 +334,16 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     style: TextStyle(
                       fontSize: 12,
                       color: Colors.grey.shade700,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Type: ${document.type.toString().split('.').last.toUpperCase()}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: iconColor,
+                      fontWeight: FontWeight.bold,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -300,10 +383,42 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
   
   Widget _buildDocumentListItem(Document document) {
+    // Get the appropriate icon based on document type
+    IconData iconData;
+    Color iconColor;
+    
+    switch (document.type) {
+      case DocumentType.pdf:
+        iconData = Icons.picture_as_pdf;
+        iconColor = Colors.red.shade700;
+        break;
+      case DocumentType.docx:
+        iconData = Icons.description;
+        iconColor = Colors.blue.shade700;
+        break;
+      case DocumentType.csv:
+        iconData = Icons.table_chart;
+        iconColor = Colors.green.shade700;
+        break;
+      default:
+        iconData = Icons.insert_drive_file;
+        iconColor = Colors.grey.shade700;
+    }
+    
     return ListTile(
-      leading: const Icon(Icons.description),
+      leading: Icon(iconData, color: iconColor, size: 32),
       title: Text(document.name),
-      subtitle: Text('Last modified: ${document.updatedAt?.toString().split('.')[0] ?? 'N/A'}'),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Last modified: ${document.updatedAt?.toString().split('.')[0] ?? 'N/A'}'),
+          Text(
+            'Type: ${document.type.toString().split('.').last.toUpperCase()}', 
+            style: TextStyle(color: iconColor, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+      isThreeLine: true,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

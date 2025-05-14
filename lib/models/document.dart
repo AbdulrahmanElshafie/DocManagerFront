@@ -67,6 +67,22 @@ class Document extends Equatable {
         developer.log('Error handling file path: $e', name: 'Document.fromJson');
       }
     }
+
+    // Determine document type from explicit type field or from file extension
+    DocumentType docType;
+    if (json['type'] != null) {
+      docType = _parseDocumentType(json['type']);
+    } else if (filePathStr != null && filePathStr.isNotEmpty) {
+      // If type not provided, try to infer from file path
+      docType = getTypeFromPath(filePathStr);
+      developer.log('Inferred document type from file path: $docType', name: 'Document.fromJson');
+    } else if (json['name'] != null && json['name'].toString().contains('.')) {
+      // If no type or file path, try to infer from document name
+      docType = getTypeFromPath(json['name']);
+      developer.log('Inferred document type from name: $docType', name: 'Document.fromJson');
+    } else {
+      docType = DocumentType.pdf; // Default fallback
+    }
     
     return Document(
       id: json['id'] ?? '',
@@ -79,23 +95,59 @@ class Document extends Equatable {
       updatedAt: json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null,
       folderId: json['folder'] ?? '',
       content: json['content'],
-      type: _parseDocumentType(json['type']),
+      type: docType,
       size: fileSize,
     );
   }
 
   static DocumentType _parseDocumentType(String? typeStr) {
-    if (typeStr == null) return DocumentType.pdf; // Default to PDF
-    
-    switch(typeStr.toLowerCase()) {
-      case 'csv':
-        return DocumentType.csv;
-      case 'docx':
-        return DocumentType.docx;
-      case 'pdf':
-      default:
-        return DocumentType.pdf;
+    if (typeStr == null) {
+      // If type is null, try to infer from name or fall back to PDF
+      return DocumentType.pdf;
     }
+    
+    // Check if the typeStr is the actual document type
+    final lowerType = typeStr.toLowerCase();
+    if (lowerType == 'csv') {
+      return DocumentType.csv;
+    } else if (lowerType == 'docx') {
+      return DocumentType.docx;
+    } else if (lowerType == 'pdf') {
+      return DocumentType.pdf;
+    }
+    
+    // Check if typeStr is actually a file path (or URL) and extract extension
+    if (typeStr.contains('.')) {
+      final extension = typeStr.split('.').last.toLowerCase();
+      if (extension == 'csv') {
+        return DocumentType.csv;
+      } else if (extension == 'docx') {
+        return DocumentType.docx;
+      } else if (extension == 'pdf') {
+        return DocumentType.pdf;
+      }
+    }
+    
+    // Default fallback
+    return DocumentType.pdf;
+  }
+
+  // Helper method to determine the document type from file name/path
+  static DocumentType getTypeFromPath(String? filePath) {
+    if (filePath == null || filePath.isEmpty) {
+      return DocumentType.pdf; // Default
+    }
+    
+    final extension = filePath.split('.').last.toLowerCase();
+    if (extension == 'csv') {
+      return DocumentType.csv;
+    } else if (extension == 'docx') {
+      return DocumentType.docx;
+    } else if (extension == 'pdf') {
+      return DocumentType.pdf;
+    }
+    
+    return DocumentType.pdf; // Default fallback
   }
 
   Map<String, dynamic> toJson() => {

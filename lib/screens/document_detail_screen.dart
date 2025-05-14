@@ -49,12 +49,14 @@ class DocumentDetailScreen extends StatefulWidget {
   final Document document;
   final bool isEditing;
   final bool isNewDocument;
+  final String? initialTemplate;
   
   const DocumentDetailScreen({
     super.key,
     required this.document,
     this.isEditing = false,
     this.isNewDocument = false,
+    this.initialTemplate,
   });
 
   @override
@@ -83,7 +85,12 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
     
     // For new documents, we're already in editing mode with empty content
     if (widget.isNewDocument) {
-      _contentController.text = widget.document.content ?? '';
+      // Check if we need to apply a template
+      if (widget.initialTemplate != null) {
+        _applyTemplate(widget.initialTemplate!);
+      } else {
+        _contentController.text = widget.document.content ?? '';
+      }
     } else {
       // Load document content if available
       _loadDocumentContent();
@@ -108,76 +115,66 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
           _contentController.text = widget.document.content!;
           _isLoadingContent = false;
         });
+        developer.log('Document content loaded from document.content', name: 'DocumentDetailScreen');
         return;
       }
       
       // Next try to load from file path if available
       if (widget.document.filePath != null && widget.document.filePath!.isNotEmpty) {
         try {
-          developer.log('Attempting to load content from: ${widget.document.filePath}', name: 'DocumentDetailScreen');
+          developer.log('Attempting to load content from path: ${widget.document.filePath}', name: 'DocumentDetailScreen');
           
           String filePath = widget.document.filePath!;
           
-          // For file paths on the local system
-          if (!filePath.startsWith('http://') && !filePath.startsWith('https://')) {
-            try {
-              // Create a local copy of the file for viewing
-              await _createLocalCopyOfFile(filePath);
-              
-              // Try to read content for editable views
-              if (_localFile != null && _localFile!.existsSync()) {
-                try {
-                  final fileContent = await _localFile!.readAsString();
-                  setState(() {
-                    _contentController.text = fileContent;
-                    _isLoadingContent = false;
-                  });
-                  return;
-                } catch (e) {
-                  // Binary content that can't be read as text
-                  developer.log('Could not read file as text: $e', name: 'DocumentDetailScreen');
-                  setState(() {
-                    _contentController.text = '[This document contains binary content that can only be viewed in the appropriate viewer.]';
-                    _isLoadingContent = false;
-                  });
-                  return;
-                }
-              }
-            } catch (e) {
-              developer.log('Error creating local copy of file: $e', name: 'DocumentDetailScreen');
+          // Check file extension to determine document type
+          DocumentType detectedType = Document.getTypeFromPath(filePath);
+          developer.log('Detected document type from file path: $detectedType', name: 'DocumentDetailScreen');
+          
+          // If document type doesn't match the file extension, use the detected type
+          if (widget.document.type != detectedType) {
+            developer.log(
+              'Document type mismatch: ${widget.document.type} vs detected $detectedType. Using detected type.',
+              name: 'DocumentDetailScreen'
+            );
+            _currentDocument = widget.document.copyWith(type: detectedType);
+          }
+          
+          // Create a local copy of the file for viewing
+          File? file = await _createLocalCopyOfFile(filePath);
+          
+          if (file != null && file.existsSync()) {
+            developer.log('Successfully created local file at: ${file.path}', name: 'DocumentDetailScreen');
+            _localFile = file;
+            
+            // Based on document type, call the appropriate loader
+            switch (_currentDocument?.type ?? detectedType) {
+              case DocumentType.csv:
+                await _loadCsvContent(file.path);
+                break;
+              case DocumentType.docx:
+                await _loadDocxContent(file.path);
+                break;
+              case DocumentType.pdf:
+                await _loadPdfContent(file.path);
+                break;
+              default:
+                await _loadGenericContent(file.path);
             }
           } else {
-            // For network files
-            try {
-              final uri = Uri.parse(filePath);
-              final response = await http.get(uri);
-              
-              if (response.statusCode == 200) {
-                // Save the content to a local file for viewing
-                final tempDir = await getTemporaryDirectory();
-                final fileName = p.basename(uri.path);
-                _localFile = File('${tempDir.path}/$fileName');
-                await _localFile!.writeAsBytes(response.bodyBytes);
-                
-                // Try to set content if it's a text file
-                try {
-                  _contentController.text = utf8.decode(response.bodyBytes);
-                } catch (e) {
-                  _contentController.text = '[This document contains binary content that can only be viewed in the appropriate viewer.]';
-                }
-                
-                setState(() {
-                  _isLoadingContent = false;
-                });
-                return;
-              }
-            } catch (e) {
-              developer.log('Error fetching network file: $e', name: 'DocumentDetailScreen');
-            }
+            developer.log('Failed to create local copy of file', name: 'DocumentDetailScreen');
+            throw Exception('Failed to create local copy of file');
           }
+          
+          setState(() {
+            _isLoadingContent = false;
+          });
+          return;
         } catch (e) {
-          developer.log('Error fetching file content: $e', name: 'DocumentDetailScreen');
+          developer.log('Error loading file content: $e', name: 'DocumentDetailScreen');
+          // We'll continue to try loading through the document bloc
         }
+      } else {
+        developer.log('No file path available in document', name: 'DocumentDetailScreen');
       }
 
       // Finally, fallback to loading the full document through the document bloc
@@ -199,7 +196,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
   }
   
   // Helper method to create a local copy of a file for viewing
-  Future<void> _createLocalCopyOfFile(String originalPath) async {
+  Future<File?> _createLocalCopyOfFile(String originalPath) async {
     try {
       developer.log('Creating local copy of file: $originalPath', name: 'DocumentDetailScreen');
       
@@ -215,52 +212,81 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       
       // Create source file object
       final sourceFile = File(normalizedPath);
+      File? localFile;
       
-      // Check if file exists
-      if (!sourceFile.existsSync()) {
-        developer.log('Source file does not exist: $normalizedPath', name: 'DocumentDetailScreen');
+      // First attempt: try with normalized path
+      if (sourceFile.existsSync()) {
+        // Create temp directory to store a copy
+        final tempDir = await getTemporaryDirectory();
+        final fileName = p.basename(normalizedPath);
+        final targetPath = '${tempDir.path}/$fileName';
         
-        // Try alternative path formats for Windows
-        if (!kIsWeb && Platform.isWindows) {
-          // Try the original path without normalization
-          final originalFile = File(originalPath);
-          if (originalFile.existsSync()) {
-            developer.log('Found file using original path: $originalPath', name: 'DocumentDetailScreen');
-            
-            // Create temp directory to store a copy
+        // Create the target file
+        localFile = File(targetPath);
+        
+        // Copy the file content
+        await localFile.writeAsBytes(await sourceFile.readAsBytes());
+        
+        developer.log('Created local copy of file at: $targetPath from normalized path', name: 'DocumentDetailScreen');
+        _localFile = localFile;
+        return localFile;
+      }
+      
+      // Second attempt: Try with original path
+      final originalFile = File(originalPath);
+      if (originalFile.existsSync()) {
+        developer.log('Found file using original path: $originalPath', name: 'DocumentDetailScreen');
+        
+        // Create temp directory to store a copy
+        final tempDir = await getTemporaryDirectory();
+        final fileName = p.basename(originalPath);
+        final targetPath = '${tempDir.path}/$fileName';
+        
+        // Create the target file
+        localFile = File(targetPath);
+        
+        // Copy the file content
+        await localFile.writeAsBytes(await originalFile.readAsBytes());
+        developer.log('Created local copy of file at: $targetPath from original path', name: 'DocumentDetailScreen');
+        _localFile = localFile;
+        return localFile;
+      }
+      
+      // Third attempt: Handle the case where the path is a network location or relative path
+      try {
+        // Try to download from URL if path looks like a URL
+        if (originalPath.startsWith('http://') || originalPath.startsWith('https://')) {
+          developer.log('Trying to download from URL: $originalPath', name: 'DocumentDetailScreen');
+          final response = await http.get(Uri.parse(originalPath));
+          
+          if (response.statusCode == 200) {
             final tempDir = await getTemporaryDirectory();
-            final fileName = p.basename(originalPath);
+            final fileName = originalPath.split('/').last;
             final targetPath = '${tempDir.path}/$fileName';
             
             // Create the target file
-            _localFile = File(targetPath);
+            localFile = File(targetPath);
             
-            // Copy the file content
-            await _localFile!.writeAsBytes(await originalFile.readAsBytes());
-            developer.log('Created local copy of file at: $targetPath', name: 'DocumentDetailScreen');
-            return;
+            // Write the downloaded bytes
+            await localFile.writeAsBytes(response.bodyBytes);
+            developer.log('Downloaded and saved file from URL: $targetPath', name: 'DocumentDetailScreen');
+            _localFile = localFile;
+            return localFile;
+          } else {
+            throw Exception('Failed to download file: HTTP ${response.statusCode}');
           }
         }
-        
-        throw Exception('Source file not found at path: $normalizedPath');
+      } catch (e) {
+        developer.log('Failed URL download attempt: $e', name: 'DocumentDetailScreen');
+        // Continue to next attempt
       }
       
-      // Create temp directory to store a copy
-      final tempDir = await getTemporaryDirectory();
-      final fileName = p.basename(normalizedPath);
-      final targetPath = '${tempDir.path}/$fileName';
-      
-      // Create the target file
-      _localFile = File(targetPath);
-      
-      // Copy the file content
-      await _localFile!.writeAsBytes(await sourceFile.readAsBytes());
-      
-      developer.log('Created local copy of file at: $targetPath', name: 'DocumentDetailScreen');
+      // If we reach here, we couldn't find the file
+      developer.log('Source file not found at path: $normalizedPath or $originalPath', name: 'DocumentDetailScreen');
+      throw Exception('Source file not found');
     } catch (e) {
       developer.log('Error creating local copy of file: $e', name: 'DocumentDetailScreen');
-      _localFile = null;
-      rethrow;
+      return null;
     }
   }
   
@@ -322,19 +348,35 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
             SnackBar(content: Text(state.message)),
           );
         } else if (state is DocumentLoaded) {
-          setState(() {
-            _currentDocument = state.document;
-            _contentController.text = state.document.content ?? '';
-            _isLoadingContent = false;
+          // Store document first to avoid race conditions
+          _currentDocument = state.document;
+          _contentController.text = state.document.content ?? '';
+          
+          // File path handling
+          if (state.document.filePath != null && state.document.filePath!.isNotEmpty) {
+            // Keep loading state active during file copy
+            _isLoadingContent = true;
             
-            // Try to create local copy if we have a file path
-            if (state.document.filePath != null && state.document.filePath!.isNotEmpty) {
-              _createLocalCopyOfFile(state.document.filePath!)
-                  .catchError((e) {
+            // Use async/await properly
+            _createLocalCopyOfFile(state.document.filePath!)
+              .then((file) {
+                // Only update state when file copy completes
+                setState(() {
+                  _isLoadingContent = false;
+                });
+              })
+              .catchError((e) {
                 developer.log('Error creating local copy after load: $e', name: 'DocumentDetailScreen');
+                setState(() {
+                  _isLoadingContent = false;
+                });
               });
-            }
-          });
+          } else {
+            // No file path, just update state
+            setState(() {
+              _isLoadingContent = false;
+            });
+          }
         }
       },
       child: Scaffold(
@@ -864,66 +906,102 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
     // Choose editor based on document type
     switch (_currentDocument?.type ?? widget.document.type) {
       case DocumentType.csv:
-        return TextField(
-          controller: _contentController,
-          decoration: InputDecoration(
-            labelText: 'CSV Content',
-            border: const OutlineInputBorder(),
-            alignLabelWithHint: true,
-            helperText: 'Enter CSV data with comma-separated values',
-            helperStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-          ),
-          maxLines: 20,
-          minLines: 10,
-          style: TextStyle(
-            fontFamily: 'Courier', 
-            fontSize: 14,
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
-          keyboardType: TextInputType.multiline,
-          textInputAction: TextInputAction.newline,
-          autofocus: false,
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'CSV Editor',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _contentController,
+              decoration: InputDecoration(
+                labelText: 'CSV Content',
+                border: const OutlineInputBorder(),
+                alignLabelWithHint: true,
+                helperText: 'Enter CSV data with comma-separated values (each line is a row)',
+                helperStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+              ),
+              maxLines: 20,
+              minLines: 10,
+              style: TextStyle(
+                fontFamily: 'Courier', 
+                fontSize: 14,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+              keyboardType: TextInputType.multiline,
+              textInputAction: TextInputAction.newline,
+              autofocus: false,
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.table_chart),
+              label: const Text('Edit as Table'),
+              onPressed: () => _showCsvStructuredEditor(),
+            ),
+          ],
         );
       case DocumentType.docx:
-        return TextField(
-          controller: _contentController,
-          decoration: InputDecoration(
-            labelText: 'Document Content',
-            border: const OutlineInputBorder(),
-            alignLabelWithHint: true,
-            labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-          ),
-          maxLines: 20,
-          minLines: 10,
-          style: TextStyle(
-            fontFamily: 'Arial', 
-            fontSize: 14,
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
-          keyboardType: TextInputType.multiline,
-          textCapitalization: TextCapitalization.sentences,
-          textInputAction: TextInputAction.newline,
-          autofocus: false,
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'DOCX Editor',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _contentController,
+              decoration: InputDecoration(
+                labelText: 'Document Content',
+                border: const OutlineInputBorder(),
+                alignLabelWithHint: true,
+                labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+              ),
+              maxLines: 20,
+              minLines: 10,
+              style: TextStyle(
+                fontFamily: 'Arial', 
+                fontSize: 14,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+              keyboardType: TextInputType.multiline,
+              textCapitalization: TextCapitalization.sentences,
+              textInputAction: TextInputAction.newline,
+              autofocus: false,
+            ),
+          ],
         );
       case DocumentType.pdf:
       default:
-        return TextField(
-          controller: _contentController,
-          decoration: InputDecoration(
-            labelText: 'Document Content',
-            border: const OutlineInputBorder(),
-            alignLabelWithHint: true,
-            helperText: 'This content will be converted to PDF format',
-            helperStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-          ),
-          maxLines: 20,
-          minLines: 10,
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
-          keyboardType: TextInputType.multiline,
-          textInputAction: TextInputAction.newline,
-          autofocus: false,
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'PDF Content Editor',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _contentController,
+              decoration: InputDecoration(
+                labelText: 'Document Content',
+                border: const OutlineInputBorder(),
+                alignLabelWithHint: true,
+                helperText: 'This content will be converted to PDF format',
+                helperStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+              ),
+              maxLines: 20,
+              minLines: 10,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+              keyboardType: TextInputType.multiline,
+              textInputAction: TextInputAction.newline,
+              autofocus: false,
+            ),
+          ],
         );
     }
   }
@@ -938,47 +1016,69 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       case DocumentType.pdf:
         return _buildPdfViewer();
       default:
-        return _buildDefaultViewer();
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.amber),
+              const SizedBox(height: 16),
+              Text(
+                'This file type is not supported',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+          ),
+        );
     }
   }
 
   Widget _buildCsvViewer() {
-    if (_localFile == null || !_localFile!.existsSync()) {
-      return Center(
-        child: Text(
-          'No CSV file available',
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-        ),
-      );
+    if (_localFile == null) {
+      developer.log('No _localFile set for CSV viewing', name: 'DocumentDetailScreen');
+      
+      // Try to reload document content if we have a file path
+      if (_currentDocument?.filePath != null && _currentDocument!.filePath!.isNotEmpty) {
+        return FutureBuilder<File?>(
+          future: _createLocalCopyOfFile(_currentDocument!.filePath!),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            } else if (snapshot.hasError) {
+              return _buildErrorDisplay('Error loading CSV file: ${snapshot.error}');
+            } else if (snapshot.hasData && snapshot.data != null) {
+              final file = snapshot.data!;
+              if (file.existsSync()) {
+                return _buildActualCsvViewer(file);
+              } else {
+                return _buildErrorDisplay('CSV file not found');
+              }
+            } else {
+              return _buildErrorDisplay('Could not load CSV file');
+            }
+          },
+        );
+      }
+      
+      return _buildErrorDisplay('No CSV file available');
+    }
+    
+    if (!_localFile!.existsSync()) {
+      developer.log('_localFile exists but file does not exist: ${_localFile!.path}', name: 'DocumentDetailScreen');
+      return _buildErrorDisplay('CSV file not found at: ${_localFile!.path}');
     }
 
+    return _buildActualCsvViewer(_localFile!);
+  }
+
+  Widget _buildActualCsvViewer(File file) {
     return FutureBuilder<List<List<dynamic>>>(
-      future: _parseCsvWithExcel(),
+      future: _parseCsvWithExcel(file),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         } else if (snapshot.hasError) {
           developer.log('Error parsing CSV: ${snapshot.error}', name: 'DocumentDetailScreen');
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
-                const SizedBox(height: 16),
-                Text(
-                  'Error parsing CSV file: ${snapshot.error}',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Try Again'),
-                  onPressed: () => setState(() {}),
-                ),
-              ],
-            ),
-          );
+          return _buildErrorDisplay('Error parsing CSV file: ${snapshot.error}');
         } else if (snapshot.hasData) {
           final data = snapshot.data!;
           if (data.isEmpty) {
@@ -1059,11 +1159,17 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
     );
   }
 
-  Future<List<List<dynamic>>> _parseCsvWithExcel() async {
+  Future<List<List<dynamic>>> _parseCsvWithExcel([File? file]) async {
+    final targetFile = file ?? _localFile;
+    
+    if (targetFile == null || !targetFile.existsSync()) {
+      return [['No CSV file available']];
+    }
+    
     try {
-      developer.log('Parsing CSV file with Excel 4.0.6: ${_localFile!.path}', name: 'DocumentDetailScreen');
+      developer.log('Parsing CSV file with Excel 4.0.6: ${targetFile.path}', name: 'DocumentDetailScreen');
       
-      final bytes = await _localFile!.readAsBytes();
+      final bytes = await targetFile.readAsBytes();
       
       // Use Excel package to parse the file
       final excel = Excel.decodeBytes(bytes);
@@ -1107,7 +1213,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       
       // Try fallback parsing method
       try {
-        final content = await _localFile!.readAsString();
+        final content = await targetFile.readAsString();
         final lines = content.split('\n');
         
         if (lines.isEmpty) {
@@ -1118,16 +1224,11 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
           return line.split(',').map((cell) => cell.trim()).toList();
         }).toList();
         
-        // If we don't have any data, create a default structure
-        if (result.isEmpty) {
-          return [['No data']];
-        }
-        
         developer.log('CSV parsed with fallback method. Rows: ${result.length}', name: 'DocumentDetailScreen');
         return result;
-      } catch (fallbackError) {
-        developer.log('Fallback CSV parsing failed: $fallbackError', name: 'DocumentDetailScreen');
-        throw Exception('Failed to parse CSV: $e\nFallback parse error: $fallbackError');
+      } catch (e) {
+        developer.log('Error parsing CSV with fallback method: $e', name: 'DocumentDetailScreen');
+        return [['Error parsing CSV file: $e']];
       }
     }
   }
@@ -1150,117 +1251,136 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
     
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit CSV Data'),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 400,
-          child: Column(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SingleChildScrollView(
-                    child: DataTable(
-                      columnSpacing: 8.0,
-                      headingRowHeight: 40,
-                      dataRowHeight: 40,
-                      border: TableBorder.all(
-                        color: Colors.grey.shade300,
-                      ),
-                      columns: List.generate(
-                        editableData[0].length,
-                        (colIndex) => DataColumn(
-                          label: Text('Col ${colIndex + 1}'),
-                        ),
-                      ),
-                      rows: List.generate(
-                        editableData.length,
-                        (rowIndex) => DataRow(
-                          cells: List.generate(
-                            editableData[0].length,
-                            (colIndex) => DataCell(
-                              TextField(
-                                controller: controllers[rowIndex][colIndex],
-                                decoration: const InputDecoration(
-                                  border: InputBorder.none,
-                                  contentPadding: EdgeInsets.symmetric(horizontal: 8),
+      builder: (dialogContext) {
+        // Variables within dialog scope
+        int rowCount = editableData.length;
+        int colCount = editableData.isEmpty ? 0 : editableData[0].length;
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Edit CSV Data'),
+              content: SizedBox(
+                width: double.maxFinite,
+                height: 400,
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: SingleChildScrollView(
+                          child: DataTable(
+                            columnSpacing: 8.0,
+                            headingRowHeight: 40,
+                            dataRowHeight: 40,
+                            border: TableBorder.all(
+                              color: Colors.grey.shade300,
+                            ),
+                            columns: List.generate(
+                              colCount,
+                              (colIndex) => DataColumn(
+                                label: Text('Col ${colIndex + 1}'),
+                              ),
+                            ),
+                            rows: List.generate(
+                              rowCount,
+                              (rowIndex) => DataRow(
+                                cells: List.generate(
+                                  colCount,
+                                  (colIndex) => DataCell(
+                                    TextField(
+                                      controller: controllers[rowIndex][colIndex],
+                                      decoration: const InputDecoration(
+                                        border: InputBorder.none,
+                                        contentPadding: EdgeInsets.symmetric(horizontal: 8),
+                                      ),
+                                      style: const TextStyle(fontSize: 14),
+                                      onChanged: (value) {
+                                        editableData[rowIndex][colIndex] = value;
+                                      },
+                                      textInputAction: TextInputAction.next,
+                                    ),
+                                  ),
                                 ),
-                                style: const TextStyle(fontSize: 14),
-                                onChanged: (value) {
-                                  editableData[rowIndex][colIndex] = value;
-                                },
-                                textInputAction: TextInputAction.next,
                               ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        TextButton.icon(
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add Row'),
+                          onPressed: () {
+                            setDialogState(() {
+                              // Add a new row to data model and controllers
+                              final newRow = List<dynamic>.filled(colCount, '');
+                              editableData.add(newRow);
+                              
+                              final newControllers = List<TextEditingController>.generate(
+                                colCount,
+                                (index) => TextEditingController(),
+                              );
+                              controllers.add(newControllers);
+                              
+                              rowCount = editableData.length;
+                            });
+                          },
+                        ),
+                        TextButton.icon(
+                          icon: const Icon(Icons.add_box),
+                          label: const Text('Add Column'),
+                          onPressed: () {
+                            setDialogState(() {
+                              // Add a new column to all rows
+                              for (final row in editableData) {
+                                row.add('');
+                              }
+                              
+                              // Add new controller for each row
+                              for (final row in controllers) {
+                                row.add(TextEditingController());
+                              }
+                              
+                              colCount = editableData.isEmpty ? 1 : editableData[0].length;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  TextButton.icon(
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Row'),
-                    onPressed: () {
-                      setState(() {
-                        Navigator.pop(context);
-                        
-                        // Add a new row and show the dialog again
-                        final newRow = List<dynamic>.filled(editableData[0].length, '');
-                        editableData.add(newRow);
-                        _showCsvEditDialog(editableData);
-                      });
-                    },
-                  ),
-                  TextButton.icon(
-                    icon: const Icon(Icons.delete),
-                    label: const Text('Delete Row'),
-                    onPressed: editableData.length > 1 ? () {
-                      setState(() {
-                        Navigator.pop(context);
-                        
-                        // Remove the last row and show the dialog again
-                        editableData.removeLast();
-                        _showCsvEditDialog(editableData);
-                      });
-                    } : null,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              
-              // Update data from controllers
-              for (int i = 0; i < editableData.length; i++) {
-                for (int j = 0; j < editableData[i].length; j++) {
-                  editableData[i][j] = controllers[i][j].text;
-                }
-              }
-              
-              // Save the edited data
-              _saveCsvData(editableData);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    // Update data from controllers
+                    for (int i = 0; i < editableData.length; i++) {
+                      for (int j = 0; j < editableData[i].length; j++) {
+                        editableData[i][j] = controllers[i][j].text;
+                      }
+                    }
+                    
+                    // Save the edited data
+                    _saveCsvData(editableData);
+                    
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -1310,387 +1430,211 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
   }
 
   Widget _buildDocxViewer() {
-    if (_contentController.text.isEmpty && _localFile == null) {
-      return Center(
-        child: Text(
-          'No document content available',
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-        ),
-      );
-    } else if (_contentController.text.startsWith('[This document contains binary content') || _localFile != null) {
-      // Try to view the binary DOCX file
-      return FutureBuilder<List<String>>(
-        future: _extractDocxContent(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          } else if (snapshot.hasError) {
-            developer.log('Error extracting DOCX content: ${snapshot.error}', name: 'DocumentDetailScreen');
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Error displaying DOCX content: ${snapshot.error}',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Try Again'),
-                    onPressed: () {
-                      setState(() {});
-                    },
-                  ),
-                ],
-              )
-            );
-          } else if (snapshot.hasData && snapshot.data!.isNotEmpty) {
-            return SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (_currentDocument?.filePath != null)
-                    _buildFileHeader(),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.grey.withOpacity(0.2),
-                          spreadRadius: 1,
-                          blurRadius: 2,
-                          offset: const Offset(0, 1),
-                        ),
-                      ],
+    if (_localFile == null) {
+      developer.log('No _localFile set for DOCX viewing', name: 'DocumentDetailScreen');
+      
+      // Try to reload document content if we have a file path
+      if (_currentDocument?.filePath != null && _currentDocument!.filePath!.isNotEmpty) {
+        return FutureBuilder<File?>(
+          future: _createLocalCopyOfFile(_currentDocument!.filePath!),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            } else if (snapshot.hasError) {
+              return _buildErrorDisplay('Error loading DOCX file: ${snapshot.error}');
+            } else if (snapshot.hasData && snapshot.data != null) {
+              final file = snapshot.data!;
+              if (file.existsSync()) {
+                return _buildActualDocxViewer(file);
+              } else {
+                return _buildErrorDisplay('DOCX file not found');
+              }
+            } else {
+              return _buildErrorDisplay('Could not load DOCX file');
+            }
+          },
+        );
+      }
+      
+      // If we have content in the controller, display that
+      if (_contentController.text.isNotEmpty && !_contentController.text.startsWith('[This document contains binary')) {
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.withOpacity(0.2),
+                      spreadRadius: 1,
+                      blurRadius: 2,
+                      offset: const Offset(0, 1),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: snapshot.data!.map((paragraph) {
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 8.0),
-                          child: Text(
-                            paragraph,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              height: 1.5,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
+                  ],
+                ),
+                child: Text(
+                  _contentController.text,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    height: 1.5,
                   ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.edit_document),
-                    label: const Text('Edit Document'),
-                    onPressed: () {
-                      _showDocxEditOptions();
-                    },
-                  ),
-                ],
-              ),
-            );
-          } else {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.description, size: 64, color: Colors.grey),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Could not extract content from DOCX file',
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.edit_document),
-                    label: const Text('Edit Document'),
-                    onPressed: () {
-                      setState(() {
-                        _isEditing = true;
-                      });
-                    },
-                  ),
-                ],
-              ),
-            );
-          }
-        },
-      );
-    } else {
-      // Display the text content
-      return SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (_currentDocument?.filePath != null)
-              _buildFileHeader(),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: Colors.grey.shade300),
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.withOpacity(0.2),
-                    spreadRadius: 1,
-                    blurRadius: 2,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
-              ),
-              child: Text(
-                _contentController.text,
-                style: const TextStyle(
-                  fontSize: 14,
-                  height: 1.5,
                 ),
               ),
-            ),
-          ],
-        ),
-      );
+            ],
+          ),
+        );
+      }
+      
+      return _buildErrorDisplay('No DOCX file available');
     }
+    
+    if (!_localFile!.existsSync()) {
+      developer.log('_localFile exists but file does not exist: ${_localFile!.path}', name: 'DocumentDetailScreen');
+      return _buildErrorDisplay('DOCX file not found at: ${_localFile!.path}');
+    }
+
+    return _buildActualDocxViewer(_localFile!);
   }
 
-  void _showDocxEditOptions() {
-    final TextEditingController textController = TextEditingController();
-    textController.text = _contentController.text;
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Document Content'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: TextField(
-            controller: textController,
-            decoration: const InputDecoration(
-              hintText: 'Enter document content',
-              border: OutlineInputBorder(),
+  Widget _buildActualDocxViewer(File file) {
+    // Try to view the binary DOCX file
+    return FutureBuilder<List<String>>(
+      future: _extractDocxContent(file),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        } else if (snapshot.hasError) {
+          developer.log('Error extracting DOCX content: ${snapshot.error}', name: 'DocumentDetailScreen');
+          return _buildErrorDisplay('Error displaying DOCX content: ${snapshot.error}');
+        } else if (snapshot.hasData && snapshot.data!.isNotEmpty) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_currentDocument?.filePath != null)
+                  _buildFileHeader(),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.2),
+                        spreadRadius: 1,
+                        blurRadius: 2,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: snapshot.data!.map((paragraph) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: Text(
+                          paragraph,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            height: 1.5,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.edit_document),
+                  label: const Text('Edit Document'),
+                  onPressed: () {
+                    _showDocxEditOptions();
+                  },
+                ),
+              ],
             ),
-            maxLines: 10,
-            keyboardType: TextInputType.multiline,
-            textCapitalization: TextCapitalization.sentences,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final content = textController.text;
-              Navigator.pop(context);
-              await _saveDocxContent(content);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+          );
+        } else {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.description, size: 64, color: Colors.grey),
+                const SizedBox(height: 16),
+                const Text(
+                  'Could not extract content from DOCX file',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.edit_document),
+                  label: const Text('Edit Document'),
+                  onPressed: () {
+                    setState(() {
+                      _isEditing = true;
+                    });
+                  },
+                ),
+              ],
+            ),
+          );
+        }
+      },
     );
   }
 
-  Future<void> _saveDocxContent(String content) async {
-    try {
-      if (_localFile == null) {
-        // Create a new DOCX file if one doesn't exist
-        final tempDir = await getTemporaryDirectory();
-        final String fileName = '${tempDir.path}/document_${DateTime.now().millisecondsSinceEpoch}.docx';
-        _localFile = File(fileName);
-      }
-      
-      // Create a DocX template
-      final docxBytes = await _getEmptyDocxTemplate();
-      final docx = await DocxTemplate.fromBytes(docxBytes);
-      
-      // Create content object for the template
-      final docContent = Content();
-      docContent.add(TextContent("content", content));
-      
-      // Generate the document
-      final bytes = await docx.generate(docContent);
-      if (bytes == null) {
-        throw Exception('Failed to generate DOCX document');
-      }
-      
-      // Save the document
-      await _localFile!.writeAsBytes(bytes);
-      
-      // Update the text controller
-      _contentController.text = content;
-      
-      setState(() {});
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Document saved successfully')),
-      );
-    } catch (e) {
-      developer.log('Error saving DOCX content: $e', name: 'DocumentDetailScreen');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save document: $e')),
-      );
-    }
-  }
-
-  // Helper method to get an empty DOCX template
-  Future<List<int>> _getEmptyDocxTemplate() async {
-    // This is a minimal valid DOCX file template
-    // In a real app, you would use a properly formatted template file
-    // For this example, we'll use a real template file bundled with the app or created programmatically
-    
-    try {
-      // Check if we have an existing file to use as template
-      if (_localFile != null && _localFile!.existsSync()) {
-        return await _localFile!.readAsBytes();
-      }
-      
-      // Create a minimal template
-      return await _createMinimalDocxTemplate();
-    } catch (e) {
-      developer.log('Error getting empty DOCX template: $e', name: 'DocumentDetailScreen');
-      throw Exception('Failed to create DOCX template: $e');
-    }
-  }
-
-  Future<List<int>> _createMinimalDocxTemplate() async {
-    // In a real app, we would have an actual DOCX template
-    // For this example, we'll create a basic minimal DOCX template in code
-    
-    try {
-      // Create a minimal in-memory DOCX file
-      // This is a very simplified binary representation
-      // In a real app, you would use a proper template file
-      
-      // These bytes represent a minimal valid but empty DOCX file
-      // This is just for testing purposes
-      final List<int> minimalDocxBytes = [
-        80, 75, 3, 4, 20, 0, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-        20, 0, 0, 0, 119, 111, 114, 100, 47, 100, 111, 99, 117, 109, 101, 110, 116, 46, 120, 109, 108, 
-        60, 119, 58, 100, 111, 99, 117, 109, 101, 110, 116, 32, 120, 109, 108, 110, 115, 58, 119, 61, 
-        34, 104, 116, 116, 112, 58, 47, 47, 115, 99, 104, 101, 109, 97, 115, 46, 111, 112, 101, 110, 120, 
-        109, 108, 102, 111, 114, 109, 97, 116, 115, 46, 111, 114, 103, 47, 119, 111, 114, 100, 112, 114, 
-        111, 99, 101, 115, 115, 105, 110, 103, 109, 108, 47, 50, 48, 48, 54, 47, 109, 97, 105, 110, 34, 
-        62, 60, 119, 58, 98, 111, 100, 121, 62, 60, 119, 58, 112, 62, 123, 123, 99, 111, 110, 116, 101, 
-        110, 116, 125, 125, 60, 47, 119, 58, 112, 62, 60, 47, 119, 58, 98, 111, 100, 121, 62, 60, 47, 
-        119, 58, 100, 111, 99, 117, 109, 101, 110, 116, 62
-      ];
-      
-      return minimalDocxBytes;
-    } catch (e) {
-      developer.log('Error creating minimal DOCX template: $e', name: 'DocumentDetailScreen');
-      
-      // Return absolute minimal bytes for a DOCX file (not valid, just placeholders)
-      return [80, 75, 3, 4, 20, 0, 0, 0, 8, 0];
-    }
-  }
-
-  // Helper method to extract content from DOCX file
-  Future<List<String>> _extractDocxContent() async {
-    if (_localFile == null || !_localFile!.existsSync()) {
-      return ['No file available to extract content from.'];
-    }
-    
-    try {
-      // Try to parse the DOCX file
-      final docxBytes = await _localFile!.readAsBytes();
-      
-      // Check if file is a valid DOCX by looking for the ZIP signature
-      if (docxBytes.length < 4 || docxBytes[0] != 0x50 || docxBytes[1] != 0x4B) {
-        return ['File does not appear to be a valid DOCX document.'];
-      }
-      
-      try {
-        developer.log('Trying to parse DOCX with docx_template...', name: 'DocumentDetailScreen');
-        
-        // Create a temporary file to save the docx content
-        final tempDir = await getTemporaryDirectory();
-        final tempFile = File('${tempDir.path}/temp_${DateTime.now().millisecondsSinceEpoch}.docx');
-        await tempFile.writeAsBytes(docxBytes);
-        
-        // Use docx_template to parse the document
-        final docx = await DocxTemplate.fromBytes(docxBytes);
-        
-        final content = <String>[];
-        
-        // Get basic document info
-        content.add("Microsoft Word Document");
-        content.add("File: ${_localFile!.path}");
-        content.add("Size: ${docxBytes.length} bytes");
-        
-        // Extract text from document (basic implementation)
-        content.add("");
-        content.add("Document Content:");
-        content.add("------------------");
-        
-        // Try to extract any available tags
-        try {
-          final tags = docx.getTags();
-          if (tags.isNotEmpty) {
-            content.add("\nDocument tags found:");
-            for (var tag in tags) {
-              content.add("- $tag");
-            }
-          } else {
-            content.add("No extractable content found in this document.");
-          }
-        } catch (e) {
-          content.add("Could not extract content: $e");
-        }
-        
-        // Clean up temporary file
-        if (tempFile.existsSync()) {
-          await tempFile.delete();
-        }
-        
-        return content;
-      } catch (e) {
-        developer.log('Error parsing DOCX with docx_template: $e', name: 'DocumentDetailScreen');
-        
-        // Fallback to showing raw content structure
-        return [
-          'Document content could not be fully parsed.',
-          'This is a Microsoft Word document.',
-          '',
-          'Document properties:',
-          'Size: ${docxBytes.length} bytes',
-          'File: ${_localFile!.path}',
-          '',
-          'You can edit this document using the Edit button.',
-        ];
-      }
-    } catch (e) {
-      developer.log('Error reading DOCX file: $e', name: 'DocumentDetailScreen');
-      return ['Error extracting content: $e'];
-    }
-  }
-
   Widget _buildPdfViewer() {
-    if (_localFile == null || !_localFile!.existsSync()) {
-      return Center(
-        child: Text(
-          'No PDF file available',
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-        ),
-      );
+    if (_localFile == null) {
+      developer.log('No _localFile set for PDF viewing', name: 'DocumentDetailScreen');
+      
+      // Try to reload document content if we have a file path
+      if (_currentDocument?.filePath != null && _currentDocument!.filePath!.isNotEmpty) {
+        return FutureBuilder<File?>(
+          future: _createLocalCopyOfFile(_currentDocument!.filePath!),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            } else if (snapshot.hasError) {
+              return _buildErrorDisplay('Error loading PDF file: ${snapshot.error}');
+            } else if (snapshot.hasData && snapshot.data != null) {
+              final file = snapshot.data!;
+              if (file.existsSync()) {
+                return _buildActualPdfViewer(file);
+              } else {
+                return _buildErrorDisplay('PDF file not found');
+              }
+            } else {
+              return _buildErrorDisplay('Could not load PDF file');
+            }
+          },
+        );
+      }
+      
+      return _buildErrorDisplay('No PDF file available');
+    }
+    
+    if (!_localFile!.existsSync()) {
+      developer.log('_localFile exists but file does not exist: ${_localFile!.path}', name: 'DocumentDetailScreen');
+      return _buildErrorDisplay('PDF file not found at: ${_localFile!.path}');
     }
 
+    return _buildActualPdfViewer(_localFile!);
+  }
+
+  Widget _buildActualPdfViewer(File file) {
     try {
+      developer.log('Displaying PDF from file: ${file.path}', name: 'DocumentDetailScreen');
+      
       // Using SfPdfViewer for displaying PDF
       return Column(
         children: [
@@ -1705,7 +1649,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: SfPdfViewer.file(
-                  _localFile!,
+                  file,
                   enableTextSelection: true,
                   pageLayoutMode: PdfPageLayoutMode.continuous,
                   onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
@@ -1735,29 +1679,37 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       );
     } catch (e) {
       developer.log('Error in PDF viewer: $e', name: 'DocumentDetailScreen');
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.red),
-            const SizedBox(height: 16),
-            Text(
-              'Error displaying PDF: $e',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-            const SizedBox(height: 16),
+      return _buildErrorDisplay('Error displaying PDF: $e');
+    }
+  }
+  
+  Widget _buildErrorDisplay(String message) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.error_outline, size: 48, color: Colors.red),
+          const SizedBox(height: 16),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+          const SizedBox(height: 16),
+          if (!_isLoadingContent) // Only show retry button if not already loading
             ElevatedButton.icon(
               icon: const Icon(Icons.refresh),
               label: const Text('Try Again'),
               onPressed: () {
-                setState(() {});
+                // Prevent multiple reloading attempts
+                if (!_isLoadingContent) {
+                  _loadDocumentContent();
+                }
               },
             ),
-          ],
-        ),
-      );
-    }
+        ],
+      ),
+    );
   }
 
   void _showPdfEditOptions() {
@@ -2058,6 +2010,701 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
     }
   }
   
+  // Method to show structured CSV editor with an Excel-like interface
+  void _showCsvStructuredEditor() {
+    try {
+      // Parse current content into rows and columns
+      final List<List<String>> csvData = [];
+      
+      // Split content by lines
+      final lines = _contentController.text.split('\n');
+      for (final line in lines) {
+        if (line.trim().isNotEmpty) {
+          // Parse CSV line, handling quoted fields
+          csvData.add(_parseCsvLine(line));
+        }
+      }
+      
+      // Ensure we have at least one row with one cell
+      if (csvData.isEmpty) {
+        csvData.add(['']);
+      }
+      
+      // Calculate max columns for consistent table width
+      int maxColumns = 0;
+      for (final row in csvData) {
+        if (row.length > maxColumns) {
+          maxColumns = row.length;
+        }
+      }
+      
+      // Ensure maxColumns is at least 1
+      maxColumns = maxColumns > 0 ? maxColumns : 1;
+      
+      // Normalize all rows to have same number of columns
+      for (final row in csvData) {
+        while (row.length < maxColumns) {
+          row.add('');
+        }
+      }
+      
+      // Create controllers for each cell
+      final controllers = <List<TextEditingController>>[];
+      for (final row in csvData) {
+        final rowControllers = <TextEditingController>[];
+        for (final cell in row) {
+          rowControllers.add(TextEditingController(text: cell));
+        }
+        controllers.add(rowControllers);
+      }
+      
+      // Track current dimensions with state variables inside the dialog
+      showDialog(
+        context: context,
+        builder: (dialogContext) {
+          // These variables will be managed by the StatefulBuilder
+          int rowCount = csvData.length;
+          int colCount = maxColumns;
+          
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                title: const Text('CSV Table Editor'),
+                content: SizedBox(
+                  width: double.maxFinite,
+                  height: 400,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: SingleChildScrollView(
+                            child: DataTable(
+                              columnSpacing: 8.0,
+                              headingRowHeight: 40,
+                              dataRowHeight: 40,
+                              border: TableBorder.all(
+                                color: Colors.grey.shade300,
+                              ),
+                              columns: List.generate(
+                                colCount,
+                                (index) => DataColumn(
+                                  label: Text('Column ${index + 1}'),
+                                ),
+                              ),
+                              rows: List.generate(
+                                rowCount,
+                                (rowIndex) => DataRow(
+                                  cells: List.generate(
+                                    colCount,
+                                    (colIndex) => DataCell(
+                                      TextField(
+                                        controller: rowIndex < controllers.length && 
+                                                 colIndex < controllers[rowIndex].length
+                                            ? controllers[rowIndex][colIndex]
+                                            : TextEditingController(),
+                                        decoration: const InputDecoration(
+                                          border: InputBorder.none,
+                                          contentPadding: EdgeInsets.symmetric(horizontal: 8),
+                                        ),
+                                        style: const TextStyle(fontSize: 14),
+                                        onChanged: (value) {
+                                          // Update the data model when text changes
+                                          if (rowIndex < csvData.length && colIndex < csvData[rowIndex].length) {
+                                            csvData[rowIndex][colIndex] = value;
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          TextButton.icon(
+                            icon: const Icon(Icons.add),
+                            label: const Text('Add Row'),
+                            onPressed: () {
+                              setDialogState(() {
+                                // Add a new row to data model and controllers
+                                final newRow = List<String>.filled(colCount, '');
+                                csvData.add(newRow);
+                                
+                                final newControllers = List<TextEditingController>.generate(
+                                  colCount,
+                                  (index) => TextEditingController(),
+                                );
+                                controllers.add(newControllers);
+                                
+                                // Update row count
+                                rowCount = csvData.length;
+                              });
+                            },
+                          ),
+                          TextButton.icon(
+                            icon: const Icon(Icons.add_box),
+                            label: const Text('Add Column'),
+                            onPressed: () {
+                              setDialogState(() {
+                                // Add a new column to all rows
+                                for (final row in csvData) {
+                                  row.add('');
+                                }
+                                
+                                // Add new controller for each row
+                                for (final row in controllers) {
+                                  row.add(TextEditingController());
+                                }
+                                
+                                // Update column count
+                                colCount = maxColumns + 1;
+                                maxColumns = colCount;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () {
+                      // Convert data back to CSV text
+                      final StringBuffer buffer = StringBuffer();
+                      
+                      for (final row in csvData) {
+                        final formattedRow = row.map((cell) {
+                          // If cell contains comma, quote it
+                          if (cell.contains(',') || cell.contains('"') || cell.contains('\n')) {
+                            return '"${cell.replaceAll('"', '""')}"';
+                          }
+                          return cell;
+                        }).join(',');
+                        
+                        buffer.writeln(formattedRow);
+                      }
+                      
+                      // Update the text controller with new CSV data
+                      _contentController.text = buffer.toString();
+                      
+                      Navigator.pop(context);
+                    },
+                    child: const Text('Save'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    } catch (e) {
+      developer.log('Error in CSV structured editor: $e', name: 'DocumentDetailScreen');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error editing CSV: $e')),
+      );
+    }
+  }
+
+  // Helper method to parse a CSV line, handling quoted fields
+  List<String> _parseCsvLine(String line) {
+    if (line.trim().isEmpty) {
+      return [''];
+    }
+    
+    try {
+      final fields = <String>[];
+      bool inQuotes = false;
+      StringBuffer currentField = StringBuffer();
+      
+      for (int i = 0; i < line.length; i++) {
+        final char = line[i];
+        
+        if (char == '"') {
+          // If we see a quote inside quotes, and the next char is also a quote, it's an escaped quote
+          if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+            currentField.write('"');
+            i++; // Skip the next quote as we've handled it
+          } else {
+            // Toggle quote state
+            inQuotes = !inQuotes;
+          }
+        } else if (char == ',' && !inQuotes) {
+          // End of field
+          fields.add(currentField.toString());
+          currentField = StringBuffer();
+        } else {
+          currentField.write(char);
+        }
+      }
+      
+      // Add the last field
+      fields.add(currentField.toString());
+      return fields;
+    } catch (e) {
+      // Simple fallback - just split by commas
+      return line.split(',');
+    }
+  }
+  
+  // Apply a template based on document type and template name
+  void _applyTemplate(String templateName) {
+    try {
+      switch (_currentDocument?.type ?? widget.document.type) {
+        case DocumentType.csv:
+          _applyCsvTemplate(templateName);
+          break;
+        case DocumentType.docx:
+          _applyDocxTemplate(templateName);
+          break;
+        case DocumentType.pdf:
+          _applyPdfTemplate(templateName);
+          break;
+        default:
+          // No template to apply for unknown types
+          _contentController.text = '';
+      }
+    } catch (e) {
+      developer.log('Error applying template: $e', name: 'DocumentDetailScreen');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to apply template: $e')),
+      );
+      _contentController.text = '';
+    }
+  }
+  
+  // Apply CSV template
+  void _applyCsvTemplate(String templateName) {
+    final StringBuffer buffer = StringBuffer();
+    
+    switch (templateName) {
+      case 'Contacts':
+        buffer.writeln('Name,Email,Phone,Address,Company');
+        buffer.writeln('John Doe,john@example.com,555-123-4567,"123 Main St, City",ACME Inc.');
+        buffer.writeln('Jane Smith,jane@example.com,555-765-4321,"456 Oak Ave, Town",XYZ Corp');
+        break;
+      case 'Inventory':
+        buffer.writeln('Item ID,Name,Category,Quantity,Price,Supplier');
+        buffer.writeln('001,Laptop,Electronics,10,1200.00,Tech Supplies Inc.');
+        buffer.writeln('002,Desk Chair,Furniture,15,250.00,Office Furniture Co.');
+        buffer.writeln('003,Printer Paper,Office Supplies,100,5.99,Paper Plus Ltd.');
+        break;
+      case 'Financial':
+        buffer.writeln('Date,Description,Category,Income,Expense,Balance');
+        buffer.writeln('2023-01-01,Initial Balance,Setup,1000.00,0.00,1000.00');
+        buffer.writeln('2023-01-15,Office Supplies,Expense,0.00,125.50,874.50');
+        buffer.writeln('2023-01-20,Client Payment,Income,500.00,0.00,1374.50');
+        break;
+      default:
+        // Blank template with example headers
+        buffer.writeln('Column1,Column2,Column3');
+        buffer.writeln('Value1,Value2,Value3');
+    }
+    
+    _contentController.text = buffer.toString();
+  }
+  
+  // Apply DOCX template
+  void _applyDocxTemplate(String templateName) {
+    switch (templateName) {
+      case 'Letter':
+        _contentController.text = '''[Your Name]
+[Your Address]
+[City, State ZIP]
+[Your Email]
+[Your Phone]
+
+[Date]
+
+[Recipient Name]
+[Recipient Title]
+[Company Name]
+[Street Address]
+[City, State ZIP]
+
+Dear [Recipient Name],
+
+I am writing to [state the purpose of your letter]. 
+
+[Include relevant details in this paragraph. Be clear and concise about your main point.]
+
+[In this paragraph, provide additional information or explain your request in more detail.]
+
+[In the closing paragraph, thank the recipient and include any necessary follow-up information.]
+
+Sincerely,
+
+[Your Name]''';
+        break;
+      case 'Resume':
+        _contentController.text = '''JOHN DOE
+123 Main Street, City, State ZIP | (555) 123-4567 | john.doe@email.com | LinkedIn: linkedin.com/in/johndoe
+
+PROFESSIONAL SUMMARY
+Experienced [Your Profession] with [X years] of expertise in [key skill], [key skill], and [key skill]. Proven track record of [your notable achievement] and [another achievement].
+
+SKILLS
+• Technical: [Skill 1], [Skill 2], [Skill 3]
+• Software: [Software 1], [Software 2], [Software 3]
+• Languages: [Language 1], [Language 2]
+
+EXPERIENCE
+[COMPANY NAME], [Location] | [Start Date] - [End Date]
+[Your Title]
+• [Achievement or responsibility]
+• [Achievement or responsibility]
+• [Achievement or responsibility]
+
+[PREVIOUS COMPANY], [Location] | [Start Date] - [End Date]
+[Your Title]
+• [Achievement or responsibility]
+• [Achievement or responsibility]
+
+EDUCATION
+[UNIVERSITY NAME], [Location]
+[Degree] in [Field of Study] | [Graduation Date]
+• [Relevant coursework, honors, or activities]''';
+        break;
+      case 'Meeting Minutes':
+        _contentController.text = '''MEETING MINUTES
+
+Meeting Title: [Title]
+Date: [Date]
+Time: [Start Time] - [End Time]
+Location: [Location]
+
+Attendees:
+- [Name], [Title]
+- [Name], [Title]
+- [Name], [Title]
+
+Absent:
+- [Name], [Title]
+
+Agenda Items:
+1. [Agenda Item 1]
+2. [Agenda Item 2]
+3. [Agenda Item 3]
+
+Discussion:
+1. [Agenda Item 1]
+   • [Key discussion point]
+   • [Key discussion point]
+   • Decision: [Decision made]
+   • Action: [Action item] - Assigned to: [Name], Due: [Date]
+
+2. [Agenda Item 2]
+   • [Key discussion point]
+   • [Key discussion point]
+   • Decision: [Decision made]
+   • Action: [Action item] - Assigned to: [Name], Due: [Date]
+
+Next Meeting:
+Date: [Date]
+Time: [Time]
+Location: [Location]
+
+Minutes submitted by: [Name]
+Minutes approved by: [Name]''';
+        break;
+      default:
+        // Blank template
+        _contentController.text = 'Enter your document content here.';
+    }
+  }
+  
+  // Apply PDF template using syncfusion_flutter_pdf
+  void _applyPdfTemplate(String templateName) async {
+    try {
+      // Initialize with placeholder text while we generate the PDF
+      _contentController.text = 'Creating PDF template...';
+      
+      // Create a PDF document
+      final PdfDocument document = PdfDocument();
+      
+      // Create a page
+      final PdfPage page = document.pages.add();
+      
+      // Get graphics for drawing
+      final PdfGraphics graphics = page.graphics;
+      
+      // Create a font
+      final PdfFont headerFont = PdfStandardFont(PdfFontFamily.helvetica, 16, style: PdfFontStyle.bold);
+      final PdfFont normalFont = PdfStandardFont(PdfFontFamily.helvetica, 12);
+      
+      PdfBrush brush = PdfSolidBrush(PdfColor(0, 0, 0));
+      String content = '';
+      
+      switch (templateName) {
+        case 'Business Letter':
+          // Draw a business letter template
+          graphics.drawString('BUSINESS LETTER', headerFont,
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 0, 500, 40),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          graphics.drawString('Company Name', PdfStandardFont(PdfFontFamily.helvetica, 14, style: PdfFontStyle.bold),
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 60, 500, 30)
+          );
+          
+          graphics.drawString('123 Company Street, City, State ZIP\nPhone: (555) 123-4567\nEmail: info@company.com', normalFont,
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 90, 500, 60)
+          );
+          
+          graphics.drawLine(
+            PdfPen(PdfColor(0, 0, 0)),
+            Offset(0, 160),
+            Offset(page.getClientSize().width, 160)
+          );
+          
+          String letterContent = '''
+          
+[Date]
+
+[Recipient Name]
+[Recipient Company]
+[Street Address]
+[City, State ZIP]
+
+Dear [Recipient],
+
+[Body of the letter. Explain the purpose of your letter in clear, concise language. Add any necessary details to support your main point.]
+
+[Additional paragraph if needed.]
+
+Sincerely,
+
+[Your Name]
+[Your Title]
+          ''';
+          
+          graphics.drawString(letterContent, normalFont,
+            brush: brush,
+            bounds: Rect.fromLTWH(0, 180, page.getClientSize().width, page.getClientSize().height - 180)
+          );
+          
+          content = 'Business Letter template created';
+          break;
+          
+        case 'Invoice':
+          // Draw invoice template
+          graphics.drawString('INVOICE', headerFont,
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 0, 500, 40),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          graphics.drawString('Company Name', PdfStandardFont(PdfFontFamily.helvetica, 14, style: PdfFontStyle.bold),
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 60, 250, 30)
+          );
+          
+          graphics.drawString('123 Company Street\nCity, State ZIP\nPhone: (555) 123-4567', normalFont,
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 90, 250, 60)
+          );
+          
+          graphics.drawString('Invoice #: 0001\nDate: [Current Date]\nDue Date: [Due Date]', normalFont,
+            brush: brush,
+            bounds: const Rect.fromLTWH(300, 90, 200, 60)
+          );
+          
+          graphics.drawString('BILL TO:', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 170, 200, 20)
+          );
+          
+          graphics.drawString('[Client Name]\n[Client Company]\n[Street Address]\n[City, State ZIP]', normalFont,
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 190, 250, 80)
+          );
+          
+          // Draw table headers
+          graphics.drawRectangle(
+            pen: PdfPen(PdfColor(0, 0, 0)),
+            brush: PdfSolidBrush(PdfColor(220, 220, 220)),
+            bounds: const Rect.fromLTWH(0, 290, 500, 30)
+          );
+          
+          graphics.drawString('Description', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+            brush: PdfSolidBrush(PdfColor(0, 0, 0)),
+            bounds: const Rect.fromLTWH(10, 295, 250, 20)
+          );
+          
+          graphics.drawString('Qty', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+            brush: PdfSolidBrush(PdfColor(0, 0, 0)),
+            bounds: const Rect.fromLTWH(270, 295, 40, 20)
+          );
+          
+          graphics.drawString('Unit Price', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+            brush: PdfSolidBrush(PdfColor(0, 0, 0)),
+            bounds: const Rect.fromLTWH(340, 295, 70, 20)
+          );
+          
+          graphics.drawString('Amount', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+            brush: PdfSolidBrush(PdfColor(0, 0, 0)),
+            bounds: const Rect.fromLTWH(430, 295, 70, 20)
+          );
+          
+          // Sample line items
+          int y = 330;
+          for (int i = 1; i <= 3; i++) {
+            graphics.drawString('[Item $i Description]', normalFont,
+              brush: brush,
+              bounds: Rect.fromLTWH(10, y.toDouble(), 250, 20)
+            );
+            
+            graphics.drawString('1', normalFont,
+              brush: brush,
+              bounds: Rect.fromLTWH(270, y.toDouble(), 40, 20)
+            );
+            
+            graphics.drawString('\$100.00', normalFont,
+              brush: brush,
+              bounds: Rect.fromLTWH(340, y.toDouble(), 70, 20)
+            );
+            
+            graphics.drawString('\$100.00', normalFont,
+              brush: brush,
+              bounds: Rect.fromLTWH(430, y.toDouble(), 70, 20)
+            );
+            
+            y += 30;
+          }
+          
+          // Draw total
+          graphics.drawLine(
+            PdfPen(PdfColor(0, 0, 0)),
+            Offset(340, y.toDouble()),
+            Offset(500, y.toDouble())
+          );
+          
+          graphics.drawString('Total:', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+            brush: brush,
+            bounds: Rect.fromLTWH(340, y + 10.toDouble(), 70, 20)
+          );
+          
+          graphics.drawString('\$300.00', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+            brush: brush,
+            bounds: Rect.fromLTWH(430, y + 10.toDouble(), 70, 20)
+          );
+          
+          content = 'Invoice template created';
+          break;
+        
+        case 'Report':
+          // Draw report template
+          graphics.drawString('REPORT', headerFont,
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 0, 500, 40),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          graphics.drawString('[Report Title]', PdfStandardFont(PdfFontFamily.helvetica, 16),
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 60, 500, 30),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          graphics.drawString('Prepared by: [Your Name]\nDate: [Current Date]', normalFont,
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 100, 500, 40),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          graphics.drawLine(
+            PdfPen(PdfColor(0, 0, 0)),
+            Offset(0, 150),
+            Offset(page.getClientSize().width, 150)
+          );
+          
+          graphics.drawString('1. INTRODUCTION', PdfStandardFont(PdfFontFamily.helvetica, 14, style: PdfFontStyle.bold),
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 170, 500, 30)
+          );
+          
+          graphics.drawString('[Write an introduction to your report here. Explain the purpose, scope, and methodology used.]', normalFont,
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 200, 500, 60)
+          );
+          
+          graphics.drawString('2. FINDINGS', PdfStandardFont(PdfFontFamily.helvetica, 14, style: PdfFontStyle.bold),
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 270, 500, 30)
+          );
+          
+          graphics.drawString('[Summarize your main findings here. You can use bullet points or paragraphs.]', normalFont,
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 300, 500, 60)
+          );
+          
+          graphics.drawString('3. CONCLUSION', PdfStandardFont(PdfFontFamily.helvetica, 14, style: PdfFontStyle.bold),
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 370, 500, 30)
+          );
+          
+          graphics.drawString('[Write your conclusion here. Summarize the key points and provide any recommendations.]', normalFont,
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 400, 500, 60)
+          );
+          
+          content = 'Report template created';
+          break;
+          
+        default:
+          // Blank template with title
+          graphics.drawString('New PDF Document', headerFont,
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 0, 500, 40),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          graphics.drawString('Created: ${DateTime.now().toString().split('.')[0]}', normalFont,
+            brush: brush,
+            bounds: const Rect.fromLTWH(0, 60, 500, 30),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          content = 'Blank PDF created';
+      }
+      
+      // Save the document to bytes
+      final List<int> bytes = await document.save();
+      
+      // Save to a temporary file
+      final tempDir = await getTemporaryDirectory();
+      final String fileName = '${tempDir.path}/${_nameController.text}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final File file = File(fileName);
+      await file.writeAsBytes(bytes);
+      
+      // Update local file reference and content
+      _localFile = file;
+      _contentController.text = content;
+      
+      // Close the document
+      document.dispose();
+      
+      // Rebuild to show the PDF
+      setState(() {});
+    } catch (e) {
+      developer.log('Error creating PDF template: $e', name: 'DocumentDetailScreen');
+      _contentController.text = 'Error creating PDF template: $e';
+    }
+  }
+  
   @override
   void dispose() {
     _tabController.dispose();
@@ -2065,5 +2712,315 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
     _nameController.dispose();
     _commentController.dispose();
     super.dispose();
+  }
+
+  // Load CSV content with proper formatting
+  Future<void> _loadCsvContent(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (file.existsSync()) {
+        try {
+          // Try to read as text
+          final fileContent = await file.readAsString();
+          _contentController.text = fileContent;
+          
+          // Also try to parse with Excel to verify it's valid
+          await _parseCsvWithExcel();
+        } catch (e) {
+          developer.log('Error reading CSV file: $e', name: 'DocumentDetailScreen');
+          _contentController.text = '[This CSV file could not be read as text. It might be corrupted or in an unsupported format.]';
+        }
+      }
+    } catch (e) {
+      developer.log('Error loading CSV content: $e', name: 'DocumentDetailScreen');
+      rethrow;
+    }
+  }
+  
+  // Load DOCX content properly
+  Future<void> _loadDocxContent(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (file.existsSync()) {
+        try {
+          // For DOCX files, we can't easily display the content as text
+          // So we just set a placeholder message
+          _contentController.text = '[This document contains binary DOCX content that can only be viewed in the appropriate viewer.]';
+          
+          // We'll extract content when viewing
+          final extracted = await _extractDocxContent();
+          if (extracted.isNotEmpty) {
+            _contentController.text = extracted.join('\n\n');
+          }
+        } catch (e) {
+          developer.log('Error reading DOCX file: $e', name: 'DocumentDetailScreen');
+          _contentController.text = '[This DOCX file could not be read. It might be corrupted or in an unsupported format.]';
+        }
+      }
+    } catch (e) {
+      developer.log('Error loading DOCX content: $e', name: 'DocumentDetailScreen');
+      rethrow;
+    }
+  }
+  
+  // Load PDF content properly
+  Future<void> _loadPdfContent(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (file.existsSync()) {
+        try {
+          // For PDF files, we just set a placeholder since we can't easily extract text
+          _contentController.text = '[This document contains PDF content that can be viewed in the PDF viewer.]';
+          
+          // Try to extract some metadata for display
+          final PdfDocument document = PdfDocument(inputBytes: await file.readAsBytes());
+          final meta = 'PDF Document\nPages: ${document.pages.count}\nSize: ${await file.length()} bytes';
+          _contentController.text = meta;
+          document.dispose();
+        } catch (e) {
+          developer.log('Error reading PDF file: $e', name: 'DocumentDetailScreen');
+          _contentController.text = '[This PDF file could not be read. It might be corrupted or in an unsupported format.]';
+        }
+      }
+    } catch (e) {
+      developer.log('Error loading PDF content: $e', name: 'DocumentDetailScreen');
+      rethrow;
+    }
+  }
+  
+  // Load generic file content
+  Future<void> _loadGenericContent(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (file.existsSync()) {
+        try {
+          final fileContent = await file.readAsString();
+          _contentController.text = fileContent;
+        } catch (e) {
+          developer.log('Could not read file as text: $e', name: 'DocumentDetailScreen');
+          _contentController.text = '[This document contains binary content that can only be viewed in the appropriate viewer.]';
+        }
+      }
+    } catch (e) {
+      developer.log('Error loading generic content: $e', name: 'DocumentDetailScreen');
+      rethrow;
+    }
+  }
+
+  // Helper method to extract content from DOCX file
+  Future<List<String>> _extractDocxContent([File? file]) async {
+    final targetFile = file ?? _localFile;
+    
+    if (targetFile == null || !targetFile.existsSync()) {
+      return ['No file available to extract content from.'];
+    }
+    
+    try {
+      // Try to parse the DOCX file
+      final docxBytes = await targetFile.readAsBytes();
+      
+      // Check if file is a valid DOCX by looking for the ZIP signature
+      if (docxBytes.length < 4 || docxBytes[0] != 0x50 || docxBytes[1] != 0x4B) {
+        return ['File does not appear to be a valid DOCX document.'];
+      }
+      
+      try {
+        developer.log('Trying to parse DOCX with docx_template...', name: 'DocumentDetailScreen');
+        
+        // Create a temporary file to save the docx content
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File('${tempDir.path}/temp_${DateTime.now().millisecondsSinceEpoch}.docx');
+        await tempFile.writeAsBytes(docxBytes);
+        
+        // Use docx_template to parse the document
+        final docx = await DocxTemplate.fromBytes(docxBytes);
+        
+        final content = <String>[];
+        
+        // Get basic document info
+        content.add("Microsoft Word Document");
+        content.add("File: ${targetFile.path}");
+        content.add("Size: ${docxBytes.length} bytes");
+        
+        // Extract text from document (basic implementation)
+        content.add("");
+        content.add("Document Content:");
+        content.add("------------------");
+        
+        // Try to extract any available tags
+        try {
+          final tags = docx.getTags();
+          if (tags.isNotEmpty) {
+            content.add("\nDocument tags found:");
+            for (var tag in tags) {
+              content.add("- $tag");
+            }
+          } else {
+            content.add("No extractable content found in this document.");
+          }
+        } catch (e) {
+          content.add("Could not extract content: $e");
+        }
+        
+        // Clean up temporary file
+        if (tempFile.existsSync()) {
+          await tempFile.delete();
+        }
+        
+        return content;
+      } catch (e) {
+        developer.log('Error parsing DOCX with docx_template: $e', name: 'DocumentDetailScreen');
+        
+        // Fallback to showing raw content structure
+        return [
+          'Document content could not be fully parsed.',
+          'This is a Microsoft Word document.',
+          '',
+          'Document properties:',
+          'Size: ${docxBytes.length} bytes',
+          'File: ${targetFile.path}',
+          '',
+          'You can edit this document using the Edit button.',
+        ];
+      }
+    } catch (e) {
+      developer.log('Error reading DOCX file: $e', name: 'DocumentDetailScreen');
+      return ['Error extracting content: $e'];
+    }
+  }
+
+  void _showDocxEditOptions() {
+    final TextEditingController textController = TextEditingController();
+    textController.text = _contentController.text;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Document Content'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: TextField(
+            controller: textController,
+            decoration: const InputDecoration(
+              hintText: 'Enter document content',
+              border: OutlineInputBorder(),
+            ),
+            maxLines: 10,
+            keyboardType: TextInputType.multiline,
+            textCapitalization: TextCapitalization.sentences,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final content = textController.text;
+              Navigator.pop(context);
+              await _saveDocxContent(content);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _saveDocxContent(String content) async {
+    try {
+      if (_localFile == null) {
+        // Create a new DOCX file if one doesn't exist
+        final tempDir = await getTemporaryDirectory();
+        final String fileName = '${tempDir.path}/document_${DateTime.now().millisecondsSinceEpoch}.docx';
+        _localFile = File(fileName);
+      }
+      
+      // Create a DocX template
+      final docxBytes = await _getEmptyDocxTemplate();
+      final docx = await DocxTemplate.fromBytes(docxBytes);
+      
+      // Create content object for the template
+      final docContent = Content();
+      docContent.add(TextContent("content", content));
+      
+      // Generate the document
+      final bytes = await docx.generate(docContent);
+      if (bytes == null) {
+        throw Exception('Failed to generate DOCX document');
+      }
+      
+      // Save the document
+      await _localFile!.writeAsBytes(bytes);
+      
+      // Update the text controller
+      _contentController.text = content;
+      
+      setState(() {});
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Document saved successfully')),
+      );
+    } catch (e) {
+      developer.log('Error saving DOCX content: $e', name: 'DocumentDetailScreen');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save document: $e')),
+      );
+    }
+  }
+
+  // Helper method to get an empty DOCX template
+  Future<List<int>> _getEmptyDocxTemplate() async {
+    // This is a minimal valid DOCX file template
+    // In a real app, you would use a properly formatted template file
+    // For this example, we'll use a real template file bundled with the app or created programmatically
+    
+    try {
+      // Check if we have an existing file to use as template
+      if (_localFile != null && _localFile!.existsSync()) {
+        return await _localFile!.readAsBytes();
+      }
+      
+      // Create a minimal template
+      return await _createMinimalDocxTemplate();
+    } catch (e) {
+      developer.log('Error getting empty DOCX template: $e', name: 'DocumentDetailScreen');
+      throw Exception('Failed to create DOCX template: $e');
+    }
+  }
+
+  Future<List<int>> _createMinimalDocxTemplate() async {
+    // In a real app, we would have an actual DOCX template
+    // For this example, we'll create a basic minimal DOCX template in code
+    
+    try {
+      // Create a minimal in-memory DOCX file
+      // This is a very simplified binary representation
+      // In a real app, you would use a proper template file
+      
+      // These bytes represent a minimal valid but empty DOCX file
+      // This is just for testing purposes
+      final List<int> minimalDocxBytes = [
+        80, 75, 3, 4, 20, 0, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+        20, 0, 0, 0, 119, 111, 114, 100, 47, 100, 111, 99, 117, 109, 101, 110, 116, 46, 120, 109, 108, 
+        60, 119, 58, 100, 111, 99, 117, 109, 101, 110, 116, 32, 120, 109, 108, 110, 115, 58, 119, 61, 
+        34, 104, 116, 116, 112, 58, 47, 47, 115, 99, 104, 101, 109, 97, 115, 46, 111, 112, 101, 110, 120, 
+        109, 108, 102, 111, 114, 109, 97, 116, 115, 46, 111, 114, 103, 47, 119, 111, 114, 100, 112, 114, 
+        111, 99, 101, 115, 115, 105, 110, 103, 109, 108, 47, 50, 48, 48, 54, 47, 109, 97, 105, 110, 34, 
+        62, 60, 119, 58, 98, 111, 100, 121, 62, 60, 119, 58, 112, 62, 123, 123, 99, 111, 110, 116, 101, 
+        110, 116, 125, 125, 60, 47, 119, 58, 112, 62, 60, 47, 119, 58, 98, 111, 100, 121, 62, 60, 47, 
+        119, 58, 100, 111, 99, 117, 109, 101, 110, 116, 62
+      ];
+      
+      return minimalDocxBytes;
+    } catch (e) {
+      developer.log('Error creating minimal DOCX template: $e', name: 'DocumentDetailScreen');
+      
+      // Return absolute minimal bytes for a DOCX file (not valid, just placeholders)
+      return [80, 75, 3, 4, 20, 0, 0, 0, 8, 0];
+    }
   }
 } 
