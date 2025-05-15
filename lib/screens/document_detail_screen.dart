@@ -89,7 +89,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       if (widget.initialTemplate != null) {
         _applyTemplate(widget.initialTemplate!);
       } else {
-        _contentController.text = widget.document.content ?? '';
+      _contentController.text = widget.document.content ?? '';
       }
     } else {
       // Load document content if available
@@ -126,20 +126,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
           
           String filePath = widget.document.filePath!;
           
-          // Check file extension to determine document type
-          DocumentType detectedType = Document.getTypeFromPath(filePath);
-          developer.log('Detected document type from file path: $detectedType', name: 'DocumentDetailScreen');
-          
-          // If document type doesn't match the file extension, use the detected type
-          if (widget.document.type != detectedType) {
-            developer.log(
-              'Document type mismatch: ${widget.document.type} vs detected $detectedType. Using detected type.',
-              name: 'DocumentDetailScreen'
-            );
-            _currentDocument = widget.document.copyWith(type: detectedType);
-          }
-          
-          // Create a local copy of the file for viewing
+              // Create a local copy of the file for viewing
           File? file = await _createLocalCopyOfFile(filePath);
           
           if (file != null && file.existsSync()) {
@@ -147,7 +134,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
             _localFile = file;
             
             // Based on document type, call the appropriate loader
-            switch (_currentDocument?.type ?? detectedType) {
+            switch (widget.document.type) {
               case DocumentType.csv:
                 await _loadCsvContent(file.path);
                 break;
@@ -163,13 +150,13 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
           } else {
             developer.log('Failed to create local copy of file', name: 'DocumentDetailScreen');
             throw Exception('Failed to create local copy of file');
-          }
-          
-          setState(() {
-            _isLoadingContent = false;
-          });
-          return;
-        } catch (e) {
+                }
+                
+                setState(() {
+                  _isLoadingContent = false;
+                });
+                return;
+            } catch (e) {
           developer.log('Error loading file content: $e', name: 'DocumentDetailScreen');
           // We'll continue to try loading through the document bloc
         }
@@ -233,19 +220,19 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       }
       
       // Second attempt: Try with original path
-      final originalFile = File(originalPath);
-      if (originalFile.existsSync()) {
-        developer.log('Found file using original path: $originalPath', name: 'DocumentDetailScreen');
-        
-        // Create temp directory to store a copy
-        final tempDir = await getTemporaryDirectory();
-        final fileName = p.basename(originalPath);
-        final targetPath = '${tempDir.path}/$fileName';
-        
-        // Create the target file
+          final originalFile = File(originalPath);
+          if (originalFile.existsSync()) {
+            developer.log('Found file using original path: $originalPath', name: 'DocumentDetailScreen');
+            
+            // Create temp directory to store a copy
+            final tempDir = await getTemporaryDirectory();
+            final fileName = p.basename(originalPath);
+            final targetPath = '${tempDir.path}/$fileName';
+            
+            // Create the target file
         localFile = File(targetPath);
-        
-        // Copy the file content
+            
+            // Copy the file content
         await localFile.writeAsBytes(await originalFile.readAsBytes());
         developer.log('Created local copy of file at: $targetPath from original path', name: 'DocumentDetailScreen');
         _localFile = localFile;
@@ -260,11 +247,11 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
           final response = await http.get(Uri.parse(originalPath));
           
           if (response.statusCode == 200) {
-            final tempDir = await getTemporaryDirectory();
+      final tempDir = await getTemporaryDirectory();
             final fileName = originalPath.split('/').last;
-            final targetPath = '${tempDir.path}/$fileName';
-            
-            // Create the target file
+      final targetPath = '${tempDir.path}/$fileName';
+      
+      // Create the target file
             localFile = File(targetPath);
             
             // Write the downloaded bytes
@@ -349,23 +336,23 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
           );
         } else if (state is DocumentLoaded) {
           // Store document first to avoid race conditions
-          _currentDocument = state.document;
-          _contentController.text = state.document.content ?? '';
-          
+            _currentDocument = state.document;
+            _contentController.text = state.document.content ?? '';
+            
           // File path handling
-          if (state.document.filePath != null && state.document.filePath!.isNotEmpty) {
+            if (state.document.filePath != null && state.document.filePath!.isNotEmpty) {
             // Keep loading state active during file copy
             _isLoadingContent = true;
             
             // Use async/await properly
-            _createLocalCopyOfFile(state.document.filePath!)
+              _createLocalCopyOfFile(state.document.filePath!)
               .then((file) {
                 // Only update state when file copy completes
                 setState(() {
                   _isLoadingContent = false;
                 });
               })
-              .catchError((e) {
+                  .catchError((e) {
                 developer.log('Error creating local copy after load: $e', name: 'DocumentDetailScreen');
                 setState(() {
                   _isLoadingContent = false;
@@ -915,24 +902,24 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
             ),
             const SizedBox(height: 8),
             TextField(
-              controller: _contentController,
-              decoration: InputDecoration(
-                labelText: 'CSV Content',
-                border: const OutlineInputBorder(),
-                alignLabelWithHint: true,
+          controller: _contentController,
+          decoration: InputDecoration(
+            labelText: 'CSV Content',
+            border: const OutlineInputBorder(),
+            alignLabelWithHint: true,
                 helperText: 'Enter CSV data with comma-separated values (each line is a row)',
-                helperStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-              ),
-              maxLines: 20,
-              minLines: 10,
-              style: TextStyle(
-                fontFamily: 'Courier', 
-                fontSize: 14,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-              keyboardType: TextInputType.multiline,
-              textInputAction: TextInputAction.newline,
-              autofocus: false,
+            helperStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+          ),
+          maxLines: 20,
+          minLines: 10,
+          style: TextStyle(
+            fontFamily: 'Courier', 
+            fontSize: 14,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+          keyboardType: TextInputType.multiline,
+          textInputAction: TextInputAction.newline,
+          autofocus: false,
             ),
             const SizedBox(height: 8),
             ElevatedButton.icon(
@@ -952,24 +939,24 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
             ),
             const SizedBox(height: 8),
             TextField(
-              controller: _contentController,
-              decoration: InputDecoration(
-                labelText: 'Document Content',
-                border: const OutlineInputBorder(),
-                alignLabelWithHint: true,
-                labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-              ),
-              maxLines: 20,
-              minLines: 10,
-              style: TextStyle(
-                fontFamily: 'Arial', 
-                fontSize: 14,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-              keyboardType: TextInputType.multiline,
-              textCapitalization: TextCapitalization.sentences,
-              textInputAction: TextInputAction.newline,
-              autofocus: false,
+          controller: _contentController,
+          decoration: InputDecoration(
+            labelText: 'Document Content',
+            border: const OutlineInputBorder(),
+            alignLabelWithHint: true,
+            labelStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+          ),
+          maxLines: 20,
+          minLines: 10,
+          style: TextStyle(
+            fontFamily: 'Arial', 
+            fontSize: 14,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+          keyboardType: TextInputType.multiline,
+          textCapitalization: TextCapitalization.sentences,
+          textInputAction: TextInputAction.newline,
+          autofocus: false,
             ),
           ],
         );
@@ -984,22 +971,22 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
             ),
             const SizedBox(height: 8),
             TextField(
-              controller: _contentController,
-              decoration: InputDecoration(
-                labelText: 'Document Content',
-                border: const OutlineInputBorder(),
-                alignLabelWithHint: true,
-                helperText: 'This content will be converted to PDF format',
-                helperStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-              ),
-              maxLines: 20,
-              minLines: 10,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-              keyboardType: TextInputType.multiline,
-              textInputAction: TextInputAction.newline,
-              autofocus: false,
+          controller: _contentController,
+          decoration: InputDecoration(
+            labelText: 'Document Content',
+            border: const OutlineInputBorder(),
+            alignLabelWithHint: true,
+            helperText: 'This content will be converted to PDF format',
+            helperStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+          ),
+          maxLines: 20,
+          minLines: 10,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+          keyboardType: TextInputType.multiline,
+          textInputAction: TextInputAction.newline,
+          autofocus: false,
             ),
           ],
         );
@@ -1259,67 +1246,67 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Text('Edit CSV Data'),
-              content: SizedBox(
-                width: double.maxFinite,
-                height: 400,
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: SingleChildScrollView(
-                          child: DataTable(
-                            columnSpacing: 8.0,
-                            headingRowHeight: 40,
-                            dataRowHeight: 40,
-                            border: TableBorder.all(
-                              color: Colors.grey.shade300,
-                            ),
-                            columns: List.generate(
+        title: const Text('Edit CSV Data'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SingleChildScrollView(
+                    child: DataTable(
+                      columnSpacing: 8.0,
+                      headingRowHeight: 40,
+                      dataRowHeight: 40,
+                      border: TableBorder.all(
+                        color: Colors.grey.shade300,
+                      ),
+                      columns: List.generate(
                               colCount,
-                              (colIndex) => DataColumn(
-                                label: Text('Col ${colIndex + 1}'),
-                              ),
-                            ),
-                            rows: List.generate(
+                        (colIndex) => DataColumn(
+                          label: Text('Col ${colIndex + 1}'),
+                        ),
+                      ),
+                      rows: List.generate(
                               rowCount,
-                              (rowIndex) => DataRow(
-                                cells: List.generate(
+                        (rowIndex) => DataRow(
+                          cells: List.generate(
                                   colCount,
-                                  (colIndex) => DataCell(
-                                    TextField(
-                                      controller: controllers[rowIndex][colIndex],
-                                      decoration: const InputDecoration(
-                                        border: InputBorder.none,
-                                        contentPadding: EdgeInsets.symmetric(horizontal: 8),
-                                      ),
-                                      style: const TextStyle(fontSize: 14),
-                                      onChanged: (value) {
-                                        editableData[rowIndex][colIndex] = value;
-                                      },
-                                      textInputAction: TextInputAction.next,
-                                    ),
-                                  ),
+                            (colIndex) => DataCell(
+                              TextField(
+                                controller: controllers[rowIndex][colIndex],
+                                decoration: const InputDecoration(
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 8),
                                 ),
+                                style: const TextStyle(fontSize: 14),
+                                onChanged: (value) {
+                                  editableData[rowIndex][colIndex] = value;
+                                },
+                                textInputAction: TextInputAction.next,
                               ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        TextButton.icon(
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add Row'),
-                          onPressed: () {
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  TextButton.icon(
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add Row'),
+                    onPressed: () {
                             setDialogState(() {
                               // Add a new row to data model and controllers
                               final newRow = List<dynamic>.filled(colCount, '');
-                              editableData.add(newRow);
+                        editableData.add(newRow);
                               
                               final newControllers = List<TextEditingController>.generate(
                                 colCount,
@@ -1328,10 +1315,10 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
                               controllers.add(newControllers);
                               
                               rowCount = editableData.length;
-                            });
-                          },
-                        ),
-                        TextButton.icon(
+                      });
+                    },
+                  ),
+                  TextButton.icon(
                           icon: const Icon(Icons.add_box),
                           label: const Text('Add Column'),
                           onPressed: () {
@@ -1349,34 +1336,34 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
                               colCount = editableData.isEmpty ? 1 : editableData[0].length;
                             });
                           },
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              actions: [
-                TextButton(
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    // Update data from controllers
-                    for (int i = 0; i < editableData.length; i++) {
-                      for (int j = 0; j < editableData[i].length; j++) {
-                        editableData[i][j] = controllers[i][j].text;
-                      }
-                    }
-                    
-                    // Save the edited data
-                    _saveCsvData(editableData);
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              // Update data from controllers
+              for (int i = 0; i < editableData.length; i++) {
+                for (int j = 0; j < editableData[i].length; j++) {
+                  editableData[i][j] = controllers[i][j].text;
+                }
+              }
+              
+              // Save the edited data
+              _saveCsvData(editableData);
                     
                     Navigator.pop(context);
-                  },
-                  child: const Text('Save'),
-                ),
-              ],
+            },
+            child: const Text('Save'),
+          ),
+        ],
             );
           },
         );
@@ -1437,10 +1424,10 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       if (_currentDocument?.filePath != null && _currentDocument!.filePath!.isNotEmpty) {
         return FutureBuilder<File?>(
           future: _createLocalCopyOfFile(_currentDocument!.filePath!),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            } else if (snapshot.hasError) {
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          } else if (snapshot.hasError) {
               return _buildErrorDisplay('Error loading DOCX file: ${snapshot.error}');
             } else if (snapshot.hasData && snapshot.data != null) {
               final file = snapshot.data!;
@@ -1460,9 +1447,9 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       if (_contentController.text.isNotEmpty && !_contentController.text.startsWith('[This document contains binary')) {
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16.0),
-          child: Column(
+              child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+                children: [
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
@@ -1513,88 +1500,88 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
         } else if (snapshot.hasError) {
           developer.log('Error extracting DOCX content: ${snapshot.error}', name: 'DocumentDetailScreen');
           return _buildErrorDisplay('Error displaying DOCX content: ${snapshot.error}');
-        } else if (snapshot.hasData && snapshot.data!.isNotEmpty) {
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (_currentDocument?.filePath != null)
-                  _buildFileHeader(),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    border: Border.all(color: Colors.grey.shade300),
-                    borderRadius: BorderRadius.circular(8),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withOpacity(0.2),
-                        spreadRadius: 1,
-                        blurRadius: 2,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: snapshot.data!.map((paragraph) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 8.0),
-                        child: Text(
-                          paragraph,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            height: 1.5,
-                          ),
+          } else if (snapshot.hasData && snapshot.data!.isNotEmpty) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_currentDocument?.filePath != null)
+                    _buildFileHeader(),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.withOpacity(0.2),
+                          spreadRadius: 1,
+                          blurRadius: 2,
+                          offset: const Offset(0, 1),
                         ),
-                      );
-                    }).toList(),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: snapshot.data!.map((paragraph) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8.0),
+                          child: Text(
+                            paragraph,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              height: 1.5,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.edit_document),
-                  label: const Text('Edit Document'),
-                  onPressed: () {
-                    _showDocxEditOptions();
-                  },
-                ),
-              ],
-            ),
-          );
-        } else {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.description, size: 64, color: Colors.grey),
-                const SizedBox(height: 16),
-                const Text(
-                  'Could not extract content from DOCX file',
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.edit_document),
-                  label: const Text('Edit Document'),
-                  onPressed: () {
-                    setState(() {
-                      _isEditing = true;
-                    });
-                  },
-                ),
-              ],
-            ),
-          );
-        }
-      },
-    );
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.edit_document),
+                    label: const Text('Edit Document'),
+                    onPressed: () {
+                      _showDocxEditOptions();
+                    },
+                  ),
+                ],
+              ),
+            );
+          } else {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.description, size: 64, color: Colors.grey),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Could not extract content from DOCX file',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.edit_document),
+                    label: const Text('Edit Document'),
+                    onPressed: () {
+                      setState(() {
+                        _isEditing = true;
+                      });
+                    },
+                  ),
+                ],
+              ),
+            );
+          }
+        },
+      );
   }
 
   Widget _buildPdfViewer() {
-    if (_localFile == null) {
+      if (_localFile == null) {
       developer.log('No _localFile set for PDF viewing', name: 'DocumentDetailScreen');
       
       // Try to reload document content if we have a file path
@@ -1612,8 +1599,8 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
                 return _buildActualPdfViewer(file);
               } else {
                 return _buildErrorDisplay('PDF file not found');
-              }
-            } else {
+            }
+          } else {
               return _buildErrorDisplay('Could not load PDF file');
             }
           },
@@ -1684,18 +1671,18 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
   }
   
   Widget _buildErrorDisplay(String message) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.error_outline, size: 48, color: Colors.red),
-          const SizedBox(height: 16),
-          Text(
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const SizedBox(height: 16),
+            Text(
             message,
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
-          ),
-          const SizedBox(height: 16),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+            const SizedBox(height: 16),
           if (!_isLoadingContent) // Only show retry button if not already loading
             ElevatedButton.icon(
               icon: const Icon(Icons.refresh),
@@ -1707,9 +1694,9 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
                 }
               },
             ),
-        ],
-      ),
-    );
+          ],
+        ),
+      );
   }
 
   void _showPdfEditOptions() {

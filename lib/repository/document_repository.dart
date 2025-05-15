@@ -21,9 +21,6 @@ class DocumentRepository {
         throw Exception('Only PDF, CSV, and DOCX files are supported.');
       }
       
-      // Determine document type from extension
-      final docTypeStr = fileExt.substring(1); // Remove the dot
-      
       // Verify file exists and is readable
       if (!file.existsSync()) {
         throw Exception('File does not exist at path: ${file.path}');
@@ -37,7 +34,6 @@ class DocumentRepository {
       developer.log('Creating document from file: ${file.path} with name: $name', name: 'DocumentRepository');
       developer.log('File exists: ${file.existsSync()}', name: 'DocumentRepository');
       developer.log('File size: $fileSize bytes, Last modified: ${fileStat.modified}', name: 'DocumentRepository');
-      developer.log('Document type determined from extension: $docTypeStr', name: 'DocumentRepository');
       
       // If file is too large (> 10MB), make a copy with reduced size if possible
       if (fileSize > 10 * 1024 * 1024) {
@@ -61,7 +57,6 @@ class DocumentRepository {
           {
             'folder': folderId,
             'name': name,
-            'type': docTypeStr, // Explicitly set the document type
           }
         );
         
@@ -84,7 +79,6 @@ class DocumentRepository {
           {
             'folder': folderId,
             'name': name,
-            'type': docTypeStr, // Explicitly set the document type
           }
         );
         
@@ -115,21 +109,21 @@ class DocumentRepository {
       
       // Use PDF as default format
       String fileExtension = '.pdf';
-      String documentTypeStr = 'pdf';
+      DocumentType documentType = DocumentType.pdf;
       
       // Determine file type from name if possible
       if (name.toLowerCase().endsWith('.csv')) {
         fileExtension = '.csv';
-        documentTypeStr = 'csv';
+        documentType = DocumentType.csv;
       } else if (name.toLowerCase().endsWith('.docx')) {
         fileExtension = '.docx';
-        documentTypeStr = 'docx';
+        documentType = DocumentType.docx;
       } else if (!name.toLowerCase().endsWith('.pdf')) {
         // If no extension, append .pdf
         name = '$name.pdf';
       }
       
-      developer.log('Creating content document: $name with type: $documentTypeStr', name: 'DocumentRepository');
+      developer.log('Creating content document: $name with type: $documentType', name: 'DocumentRepository');
       
       // For non-web platforms, we need to create a temporary file
       if (!kIsWeb) {
@@ -156,7 +150,7 @@ class DocumentRepository {
               'folder': folderId,
               'name': name,
               'content': content,
-              'type': documentTypeStr
+              'type': fileExtension.replaceAll('.', '')
             };
             
             developer.log('Falling back to direct API call with data: $map', name: 'DocumentRepository');
@@ -171,7 +165,7 @@ class DocumentRepository {
             'folder': folderId,
             'name': name,
             'content': content,
-            'type': documentTypeStr
+            'type': fileExtension.replaceAll('.', '')
           };
           
           developer.log('Falling back to direct API call with data: $map', name: 'DocumentRepository');
@@ -184,7 +178,7 @@ class DocumentRepository {
           'folder': folderId,
           'name': name,
           'content': content,
-          'type': documentTypeStr
+          'type': fileExtension.replaceAll('.', '')
         };
         
         developer.log('Creating document with data: $map', name: 'DocumentRepository');
