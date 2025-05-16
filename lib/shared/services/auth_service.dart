@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:io';
+import 'dart:async'; // Add for TimeoutException
 import 'package:doc_manager/blocs/user/user_bloc.dart';
 import 'package:doc_manager/blocs/user/user_event.dart';
 import 'package:doc_manager/models/user.dart';
@@ -14,7 +15,7 @@ import 'package:http/http.dart' as http;
 class AuthService {
   final UserRepository _userRepository;
   final SecureStorageService secureStorageService;
-  // Default to online mode
+  // Default to online mode since we need real authentication
   bool _offlineMode = false;
 
   AuthService({required UserRepository userRepository, required SecureStorageService secureStorageService}) 
@@ -113,6 +114,8 @@ class AuthService {
       }
       
       // Make the actual API call to login
+      developer.log('Attempting to login to ${API.baseUrl}${API.login}', name: 'AuthService');
+      
       final response = await http.post(
         Uri.parse('${API.baseUrl}${API.login}'),
         headers: {
@@ -123,10 +126,17 @@ class AuthService {
           'username': username,
           'password': password,
         }),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 15));  // Increased timeout for better reliability
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
+        
+        // Check if the response has the expected format
+        if (responseData['access'] == null || responseData['refresh'] == null) {
+          developer.log('Login response missing required tokens', name: 'AuthService');
+          throw Exception('Invalid response format: missing tokens');
+        }
+        
         final String accessToken = responseData['access'];
         final String refreshToken = responseData['refresh'];
         
@@ -148,12 +158,15 @@ class AuthService {
           if (userResponse.statusCode == 200) {
             final userData = json.decode(userResponse.body);
             await secureStorageService.writeSecureData('userId', userData['id'].toString());
+          } else {
+            developer.log('User profile request failed: ${userResponse.statusCode}', name: 'AuthService');
           }
         } catch (e) {
           developer.log('Failed to fetch user data: $e', name: 'AuthService');
           // Continue with login even if user fetch fails
         }
         
+        developer.log('Login successful', name: 'AuthService');
         return true;
       } else {
         developer.log('Login failed: ${response.statusCode} ${response.body}', name: 'AuthService');
@@ -162,17 +175,19 @@ class AuthService {
     } catch (e) {
       developer.log('Login failed: $e', name: 'AuthService');
       
-      // If it's a network error, switch to offline mode
-      if (e is SocketException || e is http.ClientException || e is HttpException) {
-        developer.log('Network error detected, switching to offline mode', name: 'AuthService');
-        enableOfflineMode();
-        await secureStorageService.writeSecureData('authToken', 'mock_token');
-        await secureStorageService.writeSecureData('refreshToken', 'mock_refresh_token');
-        await secureStorageService.writeSecureData('userId', '1');
-        return true;
+      // Provide more specific error handling
+      if (e is SocketException) {
+        developer.log('Network connection error: ${e.message}', name: 'AuthService');
+        throw Exception('Failed to connect to server. Please check your internet connection.');
+      } else if (e is http.ClientException) {
+        developer.log('HTTP client error: ${e.message}', name: 'AuthService');
+        throw Exception('Connection error: ${e.message}');
+      } else if (e is TimeoutException) {
+        developer.log('Request timeout', name: 'AuthService');
+        throw Exception('Server request timed out. Please try again later.');
+      } else {
+        throw Exception('Login failed: $e');
       }
-      
-      return false;
     }
   }
 
@@ -263,9 +278,12 @@ class AuthService {
         return mockToken;
       }
       
+      developer.log('Attempting to refresh token at ${API.baseUrl}${API.refreshToken}', name: 'AuthService');
+      
       final refreshToken = await secureStorageService.readSecureData('refreshToken');
       
       if (refreshToken == null || refreshToken.isEmpty) {
+        developer.log('No refresh token available', name: 'AuthService');
         return null;
       }
       
@@ -278,32 +296,43 @@ class AuthService {
         body: json.encode({
           'refresh': refreshToken,
         }),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 15)); // Increased timeout for reliability
       
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
+        
+        // Check if the response has the expected format
+        if (responseData['access'] == null) {
+          developer.log('Token refresh response missing access token', name: 'AuthService');
+          throw Exception('Invalid response format: missing token');
+        }
+        
         final String newAccessToken = responseData['access'];
         
         // Update stored access token
         await secureStorageService.writeSecureData('authToken', newAccessToken);
+        developer.log('Token refreshed successfully', name: 'AuthService');
         return newAccessToken;
       } else {
-        // If refresh fails, user needs to login again
+        developer.log('Token refresh failed: ${response.statusCode} ${response.body}', name: 'AuthService');
         return null;
       }
     } catch (e) {
       developer.log('Token refresh failed: $e', name: 'AuthService');
       
-      // If network error, switch to offline mode
-      if (e is SocketException || e is http.ClientException || e is HttpException) {
-        developer.log('Network error during token refresh, switching to offline mode', name: 'AuthService');
-        enableOfflineMode();
-        const mockToken = 'mock_refreshed_token';
-        await secureStorageService.writeSecureData('authToken', mockToken);
-        return mockToken;
+      // Handle specific error types
+      if (e is SocketException) {
+        developer.log('Network connection error during token refresh: ${e.message}', name: 'AuthService');
+        throw Exception('Failed to connect to server. Please check your internet connection.');
+      } else if (e is http.ClientException) {
+        developer.log('HTTP client error during token refresh: ${e.message}', name: 'AuthService');
+        throw Exception('Connection error: ${e.message}');
+      } else if (e is TimeoutException) {
+        developer.log('Request timeout during token refresh', name: 'AuthService');
+        throw Exception('Server request timed out. Please try again later.');
+      } else {
+        throw Exception('Token refresh failed: $e');
       }
-      
-      return null;
     }
   }
 } 

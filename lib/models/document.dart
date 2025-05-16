@@ -87,15 +87,31 @@ class Document extends Equatable {
   static DocumentType _parseDocumentType(String? typeStr) {
     if (typeStr == null) return DocumentType.pdf; // Default to PDF
     
-    switch(typeStr.toLowerCase()) {
-      case 'csv':
-        return DocumentType.csv;
-      case 'docx':
-        return DocumentType.docx;
-      case 'pdf':
-      default:
-        return DocumentType.pdf;
+    // Convert to lowercase for case-insensitive matching
+    final type = typeStr.toLowerCase();
+    
+    // Check for exact type matches first
+    if (type == 'csv') {
+      return DocumentType.csv;
+    } else if (type == 'docx' || type == 'doc') {
+      return DocumentType.docx;
+    } else if (type == 'pdf') {
+      return DocumentType.pdf;
     }
+    
+    // If type might be a filename or path, check extensions
+    if (type.contains('.')) {
+      if (type.endsWith('.csv')) {
+        return DocumentType.csv;
+      } else if (type.endsWith('.docx') || type.endsWith('.doc')) {
+        return DocumentType.docx;
+      } else if (type.endsWith('.pdf')) {
+        return DocumentType.pdf;
+      }
+    }
+    
+    // Default to PDF if we can't determine the type
+    return DocumentType.pdf;
   }
 
   Map<String, dynamic> toJson() => {

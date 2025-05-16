@@ -73,15 +73,15 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     switch (_selectedDocumentType) {
                       case DocumentType.pdf:
                         availableTemplates.clear();
-                        availableTemplates.addAll(['Blank', 'Business Letter', 'Invoice', 'Report']);
+                        availableTemplates.addAll(['Blank', 'Business Letter', 'Invoice', 'Report', 'Certificate']);
                         break;
                       case DocumentType.docx:
                         availableTemplates.clear();
-                        availableTemplates.addAll(['Blank', 'Letter', 'Resume', 'Meeting Minutes']);
+                        availableTemplates.addAll(['Blank', 'Letter', 'Resume', 'Meeting Minutes', 'Project Proposal']);
                         break;
                       case DocumentType.csv:
                         availableTemplates.clear();
-                        availableTemplates.addAll(['Blank', 'Contacts', 'Inventory', 'Financial']);
+                        availableTemplates.addAll(['Blank', 'Contacts', 'Inventory', 'Financial', 'Project Planning']);
                         break;
                       default:
                         availableTemplates.clear();
@@ -112,6 +112,23 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     });
                   },
                 ),
+              const SizedBox(height: 16),
+              // Add a template description
+              if (selectedTemplate != null && selectedTemplate != 'Blank')
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    _getTemplateDescription(selectedTemplate!, _selectedDocumentType),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                ),
             ],
           ),
           actions: [
@@ -125,9 +142,29 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             ElevatedButton(
               onPressed: () {
                 if (_documentNameController.text.isNotEmpty) {
+                  // Check if the file name has the correct extension for the selected type
+                  String fileName = _documentNameController.text;
+                  switch (_selectedDocumentType) {
+                    case DocumentType.pdf:
+                      if (!fileName.toLowerCase().endsWith('.pdf')) {
+                        fileName = '$fileName.pdf';
+                      }
+                      break;
+                    case DocumentType.docx:
+                      if (!fileName.toLowerCase().endsWith('.docx')) {
+                        fileName = '$fileName.docx';
+                      }
+                      break;
+                    case DocumentType.csv:
+                      if (!fileName.toLowerCase().endsWith('.csv')) {
+                        fileName = '$fileName.csv';
+                      }
+                      break;
+                  }
+                  
                   // Create an empty document with the selected type
                   final newDocument = Document.empty(
-                    name: _documentNameController.text,
+                    name: fileName,
                     type: _selectedDocumentType,
                     folderId: widget.folderId ?? '',
                   );
@@ -163,6 +200,53 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         ),
       ),
     );
+  }
+  
+  // Get description for template
+  String _getTemplateDescription(String templateName, DocumentType documentType) {
+    switch (documentType) {
+      case DocumentType.pdf:
+        switch (templateName) {
+          case 'Business Letter':
+            return 'A professional letter template with company header, date, and signature sections.';
+          case 'Invoice':
+            return 'A standard invoice with itemized listing, pricing, and total calculations.';
+          case 'Report':
+            return 'A formal report structure with introduction, findings, and conclusion sections.';
+          case 'Certificate':
+            return 'An achievement certificate with decorative border and signature fields.';
+          default:
+            return 'A blank PDF document.';
+        }
+      case DocumentType.docx:
+        switch (templateName) {
+          case 'Letter':
+            return 'A standard letter template with sender and recipient information.';
+          case 'Resume':
+            return 'A professional resume/CV template with sections for experience, skills, and education.';
+          case 'Meeting Minutes':
+            return 'A template for recording meeting proceedings with attendees, discussion points, and action items.';
+          case 'Project Proposal':
+            return 'A comprehensive project proposal template with sections for objectives, timeline, and budget.';
+          default:
+            return 'A blank Word document.';
+        }
+      case DocumentType.csv:
+        switch (templateName) {
+          case 'Contacts':
+            return 'A contact list with columns for name, email, phone, address, and company.';
+          case 'Inventory':
+            return 'An inventory tracker with item details, quantities, and supplier information.';
+          case 'Financial':
+            return 'A financial tracker with income, expenses, and balance calculations.';
+          case 'Project Planning':
+            return 'A project task list with assignments, due dates, and status tracking.';
+          default:
+            return 'A blank spreadsheet.';
+        }
+      default:
+        return 'A blank document.';
+    }
   }
   
   @override

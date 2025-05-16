@@ -67,17 +67,40 @@ class DocumentService {
 
   /// Parse document file type
   DocumentType parseDocumentType(String filePath) {
-    final extension = filePath.split('.').last.toLowerCase();
-    
-    if (['txt', 'doc', 'docx', 'rtf'].contains(extension)) {
-      return DocumentType.text;
-    } else if (extension == 'pdf') {
-      return DocumentType.pdf;
-    } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp'].contains(extension)) {
-      return DocumentType.image;
+    // Extract extension from filename
+    final String extension;
+    if (filePath.contains('.')) {
+      extension = filePath.split('.').last.toLowerCase();
     } else {
-      LoggerUtil.warning('Unknown document type for extension: $extension');
-      return DocumentType.text; // Default
+      LoggerUtil.warning('No file extension found in path: $filePath, defaulting to PDF');
+      return DocumentType.pdf;
+    }
+    
+    // Word document formats
+    if (['doc', 'docx', 'rtf', 'dot', 'dotx', 'odt'].contains(extension)) {
+      return DocumentType.docx;
+    } 
+    // PDF format
+    else if (extension == 'pdf') {
+      return DocumentType.pdf;
+    } 
+    // Spreadsheet formats
+    else if (['csv', 'xls', 'xlsx', 'xlsm', 'ods'].contains(extension)) {
+      return DocumentType.csv;
+    } 
+    else {
+      LoggerUtil.warning('Unknown document type for extension: $extension, defaulting to type based on content analysis');
+      
+      // Try to determine the type based on the filename
+      final lowerFilePath = filePath.toLowerCase();
+      if (lowerFilePath.contains('spreadsheet') || lowerFilePath.contains('excel') || lowerFilePath.contains('csv')) {
+        return DocumentType.csv;
+      } else if (lowerFilePath.contains('word') || lowerFilePath.contains('doc') || lowerFilePath.contains('text')) {
+        return DocumentType.docx;
+      } else {
+        LoggerUtil.warning('Could not determine document type, defaulting to PDF');
+        return DocumentType.pdf;
+      }
     }
   }
 } 

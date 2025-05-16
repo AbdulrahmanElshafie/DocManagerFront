@@ -119,6 +119,15 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
         return;
       }
       
+      // If initializing a new document with a template, apply it now
+      if (widget.isNewDocument && widget.initialTemplate != null) {
+        _applyTemplate(widget.initialTemplate!);
+        setState(() {
+          _isLoadingContent = false;
+        });
+        return;
+      }
+      
       // Next try to load from file path if available
       if (widget.document.filePath != null && widget.document.filePath!.isNotEmpty) {
         try {
@@ -126,23 +135,51 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
           
           String filePath = widget.document.filePath!;
           
-              // Create a local copy of the file for viewing
+          // Create a local copy of the file for viewing
           File? file = await _createLocalCopyOfFile(filePath);
           
           if (file != null && file.existsSync()) {
             developer.log('Successfully created local file at: ${file.path}', name: 'DocumentDetailScreen');
             _localFile = file;
             
-            // Based on document type, call the appropriate loader
-            switch (widget.document.type) {
+            // Determine document type based on file extension
+            DocumentType documentType = widget.document.type;
+            
+            // Override the type based on file extension if needed
+            final extension = p.extension(file.path).toLowerCase();
+            if (extension == '.csv' || extension == '.xls' || extension == '.xlsx') {
+              documentType = DocumentType.csv;
+              developer.log('Using CSV document type based on file extension: $extension', name: 'DocumentDetailScreen');
+            } else if (extension == '.docx' || extension == '.doc' || extension == '.rtf') {
+              documentType = DocumentType.docx;
+              developer.log('Using DOCX document type based on file extension: $extension', name: 'DocumentDetailScreen');
+            } else if (extension == '.pdf') {
+              documentType = DocumentType.pdf;
+              developer.log('Using PDF document type based on file extension: $extension', name: 'DocumentDetailScreen');
+            }
+            
+            // Based on detected document type, call the appropriate loader
+            switch (documentType) {
               case DocumentType.csv:
                 await _loadCsvContent(file.path);
+                // Update current document type if different
+                if (_currentDocument != null && _currentDocument!.type != DocumentType.csv) {
+                  _currentDocument = _currentDocument!.copyWith(type: DocumentType.csv);
+                }
                 break;
               case DocumentType.docx:
                 await _loadDocxContent(file.path);
+                // Update current document type if different
+                if (_currentDocument != null && _currentDocument!.type != DocumentType.docx) {
+                  _currentDocument = _currentDocument!.copyWith(type: DocumentType.docx);
+                }
                 break;
               case DocumentType.pdf:
                 await _loadPdfContent(file.path);
+                // Update current document type if different
+                if (_currentDocument != null && _currentDocument!.type != DocumentType.pdf) {
+                  _currentDocument = _currentDocument!.copyWith(type: DocumentType.pdf);
+                }
                 break;
               default:
                 await _loadGenericContent(file.path);
@@ -150,13 +187,13 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
           } else {
             developer.log('Failed to create local copy of file', name: 'DocumentDetailScreen');
             throw Exception('Failed to create local copy of file');
-                }
+          }
                 
-                setState(() {
-                  _isLoadingContent = false;
-                });
-                return;
-            } catch (e) {
+          setState(() {
+            _isLoadingContent = false;
+          });
+          return;
+        } catch (e) {
           developer.log('Error loading file content: $e', name: 'DocumentDetailScreen');
           // We'll continue to try loading through the document bloc
         }
@@ -190,22 +227,38 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       // Normalize path for Windows if needed
       String normalizedPath = originalPath;
       if (!kIsWeb && Platform.isWindows) {
-        // Only replace backslashes if they exist
+        // Handle Windows paths better
         if (normalizedPath.contains('\\')) {
           normalizedPath = normalizedPath.replaceAll('\\', '/');
           developer.log('Normalized Windows path: $normalizedPath', name: 'DocumentDetailScreen');
         }
+        
+        // Handle Windows drive letters (like C:) - make sure the path is valid
+        if (normalizedPath.contains(':') && !normalizedPath.startsWith('/')) {
+          // Add leading slash for Windows drive letters if missing
+          normalizedPath = '/$normalizedPath';
+          developer.log('Added leading slash for Windows path: $normalizedPath', name: 'DocumentDetailScreen');
+        }
       }
       
       // Create source file object
-      final sourceFile = File(normalizedPath);
+      File? sourceFile;
+      try {
+        sourceFile = File(normalizedPath);
+      } catch (e) {
+        developer.log('Error creating source File object: $e', name: 'DocumentDetailScreen');
+        sourceFile = File(originalPath);
+      }
+      
       File? localFile;
+      
+      // Extract the original filename with extension to preserve file type
+      final String fileName = p.basename(originalPath);
       
       // First attempt: try with normalized path
       if (sourceFile.existsSync()) {
         // Create temp directory to store a copy
         final tempDir = await getTemporaryDirectory();
-        final fileName = p.basename(normalizedPath);
         final targetPath = '${tempDir.path}/$fileName';
         
         // Create the target file
@@ -220,23 +273,26 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       }
       
       // Second attempt: Try with original path
-          final originalFile = File(originalPath);
-          if (originalFile.existsSync()) {
-            developer.log('Found file using original path: $originalPath', name: 'DocumentDetailScreen');
-            
-            // Create temp directory to store a copy
-            final tempDir = await getTemporaryDirectory();
-            final fileName = p.basename(originalPath);
-            final targetPath = '${tempDir.path}/$fileName';
-            
-            // Create the target file
-        localFile = File(targetPath);
-            
-            // Copy the file content
-        await localFile.writeAsBytes(await originalFile.readAsBytes());
-        developer.log('Created local copy of file at: $targetPath from original path', name: 'DocumentDetailScreen');
-        _localFile = localFile;
-        return localFile;
+      try {
+        final originalFile = File(originalPath);
+        if (originalFile.existsSync()) {
+          developer.log('Found file using original path: $originalPath', name: 'DocumentDetailScreen');
+          
+          // Create temp directory to store a copy
+          final tempDir = await getTemporaryDirectory();
+          final targetPath = '${tempDir.path}/$fileName';
+          
+          // Create the target file
+          localFile = File(targetPath);
+          
+          // Copy the file content
+          await localFile.writeAsBytes(await originalFile.readAsBytes());
+          developer.log('Created local copy of file at: $targetPath from original path', name: 'DocumentDetailScreen');
+          _localFile = localFile;
+          return localFile;
+        }
+      } catch (e) {
+        developer.log('Error with second file copy attempt: $e', name: 'DocumentDetailScreen');
       }
       
       // Third attempt: Handle the case where the path is a network location or relative path
@@ -244,23 +300,29 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
         // Try to download from URL if path looks like a URL
         if (originalPath.startsWith('http://') || originalPath.startsWith('https://')) {
           developer.log('Trying to download from URL: $originalPath', name: 'DocumentDetailScreen');
-          final response = await http.get(Uri.parse(originalPath));
-          
-          if (response.statusCode == 200) {
-      final tempDir = await getTemporaryDirectory();
-            final fileName = originalPath.split('/').last;
-      final targetPath = '${tempDir.path}/$fileName';
-      
-      // Create the target file
-            localFile = File(targetPath);
+          try {
+            final response = await http.get(Uri.parse(originalPath));
             
-            // Write the downloaded bytes
-            await localFile.writeAsBytes(response.bodyBytes);
-            developer.log('Downloaded and saved file from URL: $targetPath', name: 'DocumentDetailScreen');
-            _localFile = localFile;
-            return localFile;
-          } else {
-            throw Exception('Failed to download file: HTTP ${response.statusCode}');
+            if (response.statusCode == 200) {
+              final tempDir = await getTemporaryDirectory();
+              // Preserve the filename from URL
+              final urlFileName = originalPath.split('/').last;
+              final targetPath = '${tempDir.path}/$urlFileName';
+              
+              // Create the target file
+              localFile = File(targetPath);
+              
+              // Write the downloaded bytes
+              await localFile.writeAsBytes(response.bodyBytes);
+              developer.log('Downloaded and saved file from URL: $targetPath', name: 'DocumentDetailScreen');
+              _localFile = localFile;
+              return localFile;
+            } else {
+              throw Exception('Failed to download file: HTTP ${response.statusCode}');
+            }
+          } catch (e) {
+            developer.log('Error downloading from URL: $e', name: 'DocumentDetailScreen');
+            throw Exception('Failed to download file: $e');
           }
         }
       } catch (e) {
@@ -269,7 +331,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       }
       
       // If we reach here, we couldn't find the file
-      developer.log('Source file not found at path: $normalizedPath or $originalPath', name: 'DocumentDetailScreen');
+      developer.log('Source file not found at any path tried', name: 'DocumentDetailScreen');
       throw Exception('Source file not found');
     } catch (e) {
       developer.log('Error creating local copy of file: $e', name: 'DocumentDetailScreen');
@@ -994,8 +1056,26 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
   }
 
   Widget _buildDocumentViewer() {
-    // Choose viewer based on document type
-    switch (_currentDocument?.type ?? widget.document.type) {
+    // If we have a local file, try to determine the document type from its extension
+    DocumentType effectiveType = _currentDocument?.type ?? widget.document.type;
+    
+    if (_localFile != null && _localFile!.existsSync()) {
+      final extension = p.extension(_localFile!.path).toLowerCase();
+      if (extension == '.csv' || extension == '.xls' || extension == '.xlsx') {
+        effectiveType = DocumentType.csv;
+      } else if (extension == '.docx' || extension == '.doc' || extension == '.rtf') {
+        effectiveType = DocumentType.docx;
+      } else if (extension == '.pdf') {
+        effectiveType = DocumentType.pdf;
+      }
+      
+      developer.log('Using document type: $effectiveType based on file extension: $extension', name: 'DocumentDetailScreen');
+    } else {
+      developer.log('Using document type from model: $effectiveType', name: 'DocumentDetailScreen');
+    }
+    
+    // Choose viewer based on effective document type
+    switch (effectiveType) {
       case DocumentType.csv:
         return _buildCsvViewer();
       case DocumentType.docx:
@@ -1074,10 +1154,57 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
             );
           }
 
+          // Check for irregular row lengths and normalize if needed
+          bool hasIrregularRows = false;
+          int maxColumns = 0;
+          for (var row in data) {
+            if (row.length > maxColumns) {
+              maxColumns = row.length;
+            }
+          }
+          
+          // Normalize irregular rows by padding with empty strings
+          List<List<dynamic>> normalizedData = [];
+          for (var row in data) {
+            if (row.length < maxColumns) {
+              hasIrregularRows = true;
+              List<dynamic> paddedRow = List<dynamic>.from(row);
+              while (paddedRow.length < maxColumns) {
+                paddedRow.add('');
+              }
+              normalizedData.add(paddedRow);
+            } else {
+              normalizedData.add(row);
+            }
+          }
+          
+          // Use normalized data if needed
+          final displayData = hasIrregularRows ? normalizedData : data;
+
           return Column(
             children: [
               if (_currentDocument?.filePath != null)
                 _buildFileHeader(),
+              if (hasIrregularRows)
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    color: Colors.amber.shade100,
+                    child: Row(
+                      children: [
+                        const Icon(Icons.warning, color: Colors.amber),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'The CSV file has rows with different lengths. Some cells may be empty.',
+                            style: TextStyle(color: Colors.amber.shade900),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               Expanded(
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -1091,12 +1218,12 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
                         color: Colors.grey.shade300,
                         width: 1,
                       ),
-                      columns: data.isNotEmpty
+                      columns: displayData.isNotEmpty && displayData[0].isNotEmpty
                           ? List.generate(
-                              data[0].length,
+                              displayData[0].length,
                               (index) => DataColumn(
                                 label: Text(
-                                  data[0][index]?.toString() ?? '',
+                                  displayData[0][index]?.toString() ?? '',
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     color: Theme.of(context).colorScheme.primary,
@@ -1104,16 +1231,18 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
                                 ),
                               ),
                             )
-                          : [],
-                      rows: data.length > 1
+                          : [const DataColumn(label: Text('No columns found'))],
+                      rows: displayData.length > 1
                           ? List.generate(
-                              data.length - 1,
+                              displayData.length - 1,
                               (rowIndex) => DataRow(
                                 cells: List.generate(
-                                  data[0].length,
+                                  displayData[0].length,
                                   (colIndex) => DataCell(
                                     Text(
-                                      data[rowIndex + 1][colIndex]?.toString() ?? '',
+                                      colIndex < displayData[rowIndex + 1].length 
+                                          ? displayData[rowIndex + 1][colIndex]?.toString() ?? '' 
+                                          : '',
                                     ),
                                   ),
                                 ),
@@ -1132,7 +1261,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
                     icon: const Icon(Icons.edit),
                     label: const Text('Edit CSV'),
                     onPressed: () {
-                      _showCsvEditDialog(data);
+                      _showCsvEditDialog(displayData);
                     },
                   ),
                 ],
@@ -1146,6 +1275,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
     );
   }
 
+  // Parse CSV with Excel
   Future<List<List<dynamic>>> _parseCsvWithExcel([File? file]) async {
     final targetFile = file ?? _localFile;
     
@@ -1158,73 +1288,158 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       
       final bytes = await targetFile.readAsBytes();
       
-      // Use Excel package to parse the file
-      final excel = Excel.decodeBytes(bytes);
-      
-      if (excel.tables.isEmpty) {
-        return [['No data found in CSV file']];
-      }
-      
-      // Get the first sheet
-      final sheet = excel.tables.keys.first;
-      final table = excel.tables[sheet]!;
-      
-      final List<List<dynamic>> result = [];
-      
-      // Convert Excel rows to list format
-      for (var rowIndex = 0; rowIndex < table.maxRows; rowIndex++) {
-        final rowData = <dynamic>[];
+      try {
+        // Use Excel package to parse the file
+        final excel = Excel.decodeBytes(bytes);
         
-        // Get the number of columns in this row
-        int colCount = 0;
-        for (var cell in table.rows[rowIndex]) {
-          if (cell != null) colCount++;
+        if (excel.tables.isEmpty) {
+          return [['No data found in CSV file']];
         }
         
-        for (var colIndex = 0; colIndex < colCount; colIndex++) {
-          final cell = table.cell(CellIndex.indexByColumnRow(
-            columnIndex: colIndex, 
-            rowIndex: rowIndex
-          ));
+        // Get the first sheet
+        final sheet = excel.tables.keys.first;
+        final table = excel.tables[sheet]!;
+        
+        final List<List<dynamic>> result = [];
+        
+        // Convert Excel rows to list format
+        for (var rowIndex = 0; rowIndex < table.maxRows; rowIndex++) {
+          final rowData = <dynamic>[];
           
-          rowData.add(cell.value);
+          // Get the number of columns in this row
+          int maxCol = 0;
+          for (var cell in table.rows[rowIndex]) {
+            // Fix: Use columnIndex instead of colIndex
+            if (cell != null && cell.columnIndex > maxCol) {
+              maxCol = cell.columnIndex;
+            }
+          }
+          
+          for (var colIndex = 0; colIndex <= maxCol; colIndex++) {
+            final cell = table.cell(CellIndex.indexByColumnRow(
+              // Fix: Use columnIndex and rowIndex
+              columnIndex: colIndex, 
+              rowIndex: rowIndex
+            ));
+            
+            rowData.add(cell.value);
+          }
+          result.add(rowData);
         }
-        result.add(rowData);
+        
+        developer.log('CSV parsed successfully. Rows: ${result.length}, Columns: ${result.isNotEmpty ? result[0].length : 0}', 
+                 name: 'DocumentDetailScreen');
+        return result;
+      } catch (e) {
+        developer.log('Error parsing with Excel, trying fallback CSV parser: $e', name: 'DocumentDetailScreen');
+        throw e; // Continue to fallback
       }
-      
-      developer.log('CSV parsed successfully. Rows: ${result.length}, Columns: ${result.isNotEmpty ? result[0].length : 0}', 
-               name: 'DocumentDetailScreen');
-      return result;
     } catch (e) {
       developer.log('Error parsing CSV with Excel package: $e', name: 'DocumentDetailScreen');
       
-      // Try fallback parsing method
+      // Try fallback parsing method with more robust algorithm
       try {
         final content = await targetFile.readAsString();
-        final lines = content.split('\n');
         
-        if (lines.isEmpty) {
+        // Handle common CSV issues
+        List<List<dynamic>> parsedCsv = [];
+        
+        if (content.isEmpty) {
           return [['CSV file is empty']];
         }
         
-        final result = lines.where((line) => line.trim().isNotEmpty).map((line) {
-          return line.split(',').map((cell) => cell.trim()).toList();
-        }).toList();
-        
-        developer.log('CSV parsed with fallback method. Rows: ${result.length}', name: 'DocumentDetailScreen');
-        return result;
+        // Use CSV package for more robust parsing
+        try {
+          final csvParser = const CsvToListConverter();
+          parsedCsv = csvParser.convert(content);
+          
+          if (parsedCsv.isEmpty) {
+            return [['No data found in CSV file']];
+          }
+          
+          developer.log('CSV parsed with CSV package. Rows: ${parsedCsv.length}', name: 'DocumentDetailScreen');
+          return parsedCsv;
+        } catch (e) {
+          developer.log('Error with CSV package, trying simple line parser: $e', name: 'DocumentDetailScreen');
+          
+          // Even more basic fallback
+          final lines = content.split('\n');
+          
+          if (lines.isEmpty) {
+            return [['CSV file is empty']];
+          }
+          
+          final result = lines.where((line) => line.trim().isNotEmpty).map((line) {
+            // Handle quoted values correctly
+            List<String> cells = [];
+            bool inQuote = false;
+            StringBuffer currentCell = StringBuffer();
+            
+            for (int i = 0; i < line.length; i++) {
+              final char = line[i];
+              
+              if (char == '"') {
+                if (i + 1 < line.length && line[i + 1] == '"') {
+                  // Escaped quote
+                  currentCell.write('"');
+                  i++; // Skip the next quote
+                } else {
+                  // Toggle quote state
+                  inQuote = !inQuote;
+                }
+              } else if (char == ',' && !inQuote) {
+                // End of cell
+                cells.add(currentCell.toString().trim());
+                currentCell = StringBuffer();
+              } else {
+                currentCell.write(char);
+              }
+            }
+            
+            // Add the last cell
+            cells.add(currentCell.toString().trim());
+            
+            return cells;
+          }).toList();
+          
+          developer.log('CSV parsed with manual method. Rows: ${result.length}', name: 'DocumentDetailScreen');
+          return result;
+        }
       } catch (e) {
-        developer.log('Error parsing CSV with fallback method: $e', name: 'DocumentDetailScreen');
+        developer.log('All CSV parsing methods failed: $e', name: 'DocumentDetailScreen');
         return [['Error parsing CSV file: $e']];
       }
     }
   }
-
+  
   void _showCsvEditDialog(List<List<dynamic>> data) {
-    // Create a copy of data for editing
+    // Check if data is valid
+    if (data.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot edit empty CSV data')),
+      );
+      return;
+    }
+    
+    // Create a defensive copy of data for editing
     final editableData = List<List<dynamic>>.from(
       data.map((row) => List<dynamic>.from(row))
     );
+    
+    // Normalize rows to ensure all have the same length
+    int maxColumns = 0;
+    for (var row in editableData) {
+      if (row.length > maxColumns) {
+        maxColumns = row.length;
+      }
+    }
+    
+    // Pad shorter rows
+    for (var row in editableData) {
+      while (row.length < maxColumns) {
+        row.add('');
+      }
+    }
     
     // Create controllers for each cell
     final controllers = <List<TextEditingController>>[];
@@ -1241,72 +1456,157 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       builder: (dialogContext) {
         // Variables within dialog scope
         int rowCount = editableData.length;
-        int colCount = editableData.isEmpty ? 0 : editableData[0].length;
+        int colCount = maxColumns;
+        bool hasHeaders = rowCount > 0; // Assume first row is headers
         
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-        title: const Text('Edit CSV Data'),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 400,
-          child: Column(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SingleChildScrollView(
-                    child: DataTable(
-                      columnSpacing: 8.0,
-                      headingRowHeight: 40,
-                      dataRowHeight: 40,
-                      border: TableBorder.all(
-                        color: Colors.grey.shade300,
-                      ),
-                      columns: List.generate(
-                              colCount,
-                        (colIndex) => DataColumn(
-                          label: Text('Col ${colIndex + 1}'),
+              title: const Text('Edit CSV Data'),
+              content: SizedBox(
+                width: double.maxFinite,
+                height: 500, // Make dialog taller
+                child: Column(
+                  children: [
+                    // Options row
+                    Row(
+                      children: [
+                        // Headers toggle
+                        Row(
+                          children: [
+                            Checkbox(
+                              value: hasHeaders,
+                              onChanged: (value) {
+                                setDialogState(() {
+                                  hasHeaders = value ?? true;
+                                });
+                              },
+                            ),
+                            const Text('First row as headers'),
+                          ],
                         ),
-                      ),
-                      rows: List.generate(
-                              rowCount,
-                        (rowIndex) => DataRow(
-                          cells: List.generate(
-                                  colCount,
-                            (colIndex) => DataCell(
-                              TextField(
-                                controller: controllers[rowIndex][colIndex],
-                                decoration: const InputDecoration(
-                                  border: InputBorder.none,
-                                  contentPadding: EdgeInsets.symmetric(horizontal: 8),
+                        const Spacer(),
+                        // Add tools menu
+                        PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_vert),
+                          onSelected: (value) {
+                            if (value == 'sort') {
+                              _showSortOptions(context, setDialogState, editableData, controllers);
+                            } else if (value == 'filter') {
+                              _showFilterOptions(context, setDialogState, editableData, controllers);
+                            } else if (value == 'import') {
+                              _importCsvData(context, setDialogState, controllers);
+                            } else if (value == 'export') {
+                              _exportCsvData(editableData);
+                            }
+                          },
+                          itemBuilder: (context) => [
+                            const PopupMenuItem<String>(
+                              value: 'sort',
+                              child: Text('Sort data'),
+                            ),
+                            const PopupMenuItem<String>(
+                              value: 'filter',
+                              child: Text('Filter data'),
+                            ),
+                            const PopupMenuItem<String>(
+                              value: 'import',
+                              child: Text('Import CSV'),
+                            ),
+                            const PopupMenuItem<String>(
+                              value: 'export',
+                              child: Text('Export CSV'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const Divider(),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: SingleChildScrollView(
+                          child: editableData.isEmpty ? 
+                            const Center(child: Text('No data to edit')) :
+                            DataTable(
+                              columnSpacing: 8.0,
+                              headingRowHeight: 40,
+                              dataRowHeight: 40,
+                              border: TableBorder.all(
+                                color: Colors.grey.shade300,
+                              ),
+                              headingRowColor: hasHeaders ? 
+                                MaterialStateProperty.all(Theme.of(context).colorScheme.primaryContainer.withOpacity(0.2)) : 
+                                null,
+                              columns: List.generate(
+                                colCount,
+                                (colIndex) => DataColumn(
+                                  label: hasHeaders && controllers.isNotEmpty ? 
+                                    Text(
+                                      controllers[0].length > colIndex ? 
+                                      controllers[0][colIndex].text : 
+                                      'Col ${colIndex + 1}',
+                                      style: const TextStyle(fontWeight: FontWeight.bold),
+                                    ) : 
+                                    Text('Col ${colIndex + 1}'),
                                 ),
-                                style: const TextStyle(fontSize: 14),
-                                onChanged: (value) {
-                                  editableData[rowIndex][colIndex] = value;
+                              ),
+                              rows: List.generate(
+                                hasHeaders ? rowCount - 1 : rowCount,
+                                (rowIndex) {
+                                  final actualRowIndex = hasHeaders ? rowIndex + 1 : rowIndex;
+                                  // Safety check for index
+                                  if (actualRowIndex >= controllers.length) {
+                                    return const DataRow(cells: [DataCell(Text('Error: Invalid row'))]);
+                                  }
+                                  
+                                  return DataRow(
+                                    cells: List.generate(
+                                      colCount,
+                                      (colIndex) {
+                                        // Safety check for index
+                                        if (colIndex >= controllers[actualRowIndex].length) {
+                                          return const DataCell(Text('Error: Invalid column'));
+                                        }
+                                        
+                                        return DataCell(
+                                          TextField(
+                                            controller: controllers[actualRowIndex][colIndex],
+                                            decoration: const InputDecoration(
+                                              border: InputBorder.none,
+                                              contentPadding: EdgeInsets.symmetric(horizontal: 8),
+                                            ),
+                                            style: const TextStyle(fontSize: 14),
+                                            onChanged: (value) {
+                                              if (actualRowIndex < editableData.length && 
+                                                  colIndex < editableData[actualRowIndex].length) {
+                                                editableData[actualRowIndex][colIndex] = value;
+                                              }
+                                            },
+                                            textInputAction: TextInputAction.next,
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  );
                                 },
-                                textInputAction: TextInputAction.next,
                               ),
                             ),
-                          ),
                         ),
                       ),
                     ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  TextButton.icon(
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Row'),
-                    onPressed: () {
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        TextButton.icon(
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add Row'),
+                          onPressed: () {
                             setDialogState(() {
                               // Add a new row to data model and controllers
                               final newRow = List<dynamic>.filled(colCount, '');
-                        editableData.add(newRow);
+                              editableData.add(newRow);
                               
                               final newControllers = List<TextEditingController>.generate(
                                 colCount,
@@ -1315,10 +1615,10 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
                               controllers.add(newControllers);
                               
                               rowCount = editableData.length;
-                      });
-                    },
-                  ),
-                  TextButton.icon(
+                            });
+                          },
+                        ),
+                        TextButton.icon(
                           icon: const Icon(Icons.add_box),
                           label: const Text('Add Column'),
                           onPressed: () {
@@ -1336,41 +1636,496 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
                               colCount = editableData.isEmpty ? 1 : editableData[0].length;
                             });
                           },
-                  ),
-                ],
+                        ),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        TextButton.icon(
+                          icon: const Icon(Icons.remove),
+                          label: const Text('Remove Row'),
+                          onPressed: editableData.length > 1 ? () {
+                            setDialogState(() {
+                              // Don't remove the last row
+                              if (editableData.length > 1) {
+                                // Show a confirmation dialog for deleting a row
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Remove Row'),
+                                    content: const Text('Which row would you like to remove?'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      TextButton(
+                                        onPressed: () {
+                                          setDialogState(() {
+                                            // Remove the last row
+                                            if (editableData.isNotEmpty) {
+                                              editableData.removeLast();
+                                            }
+                                            if (controllers.isNotEmpty) {
+                                              controllers.removeLast();
+                                            }
+                                            rowCount = editableData.length;
+                                          });
+                                          Navigator.pop(context);
+                                        },
+                                        child: const Text('Last Row'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                            });
+                          } : null,
+                        ),
+                        TextButton.icon(
+                          icon: const Icon(Icons.remove),
+                          label: const Text('Remove Column'),
+                          onPressed: colCount > 1 ? () {
+                            setDialogState(() {
+                              // Don't remove the last column
+                              if (colCount > 1) {
+                                // Show a confirmation dialog for deleting a column
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Remove Column'),
+                                    content: const Text('Which column would you like to remove?'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      TextButton(
+                                        onPressed: () {
+                                          setDialogState(() {
+                                            // Remove the last column from each row
+                                            for (final row in editableData) {
+                                              if (row.isNotEmpty) {
+                                                row.removeLast();
+                                              }
+                                            }
+                                            
+                                            // Remove the last controller from each row
+                                            for (final row in controllers) {
+                                              if (row.isNotEmpty) {
+                                                row.removeLast();
+                                              }
+                                            }
+                                            
+                                            colCount = editableData.isEmpty ? 0 : editableData[0].length;
+                                          });
+                                          Navigator.pop(context);
+                                        },
+                                        child: const Text('Last Column'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                            });
+                          } : null,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
+              actions: [
+                TextButton(
                   onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              // Update data from controllers
-              for (int i = 0; i < editableData.length; i++) {
-                for (int j = 0; j < editableData[i].length; j++) {
-                  editableData[i][j] = controllers[i][j].text;
-                }
-              }
-              
-              // Save the edited data
-              _saveCsvData(editableData);
-                    
-                    Navigator.pop(context);
-            },
-            child: const Text('Save'),
-          ),
-        ],
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    // Update data from controllers in a safer way
+                    try {
+                      for (int i = 0; i < editableData.length && i < controllers.length; i++) {
+                        for (int j = 0; j < editableData[i].length && j < controllers[i].length; j++) {
+                          editableData[i][j] = controllers[i][j].text;
+                        }
+                      }
+                      
+                      // Save the edited data
+                      _saveCsvData(editableData);
+                      
+                      Navigator.pop(context);
+                    } catch (e) {
+                      developer.log('Error updating data from controllers: $e', name: 'DocumentDetailScreen');
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Error saving data: $e')),
+                      );
+                    }
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
             );
           },
         );
       },
     );
   }
-
+  
+  // Helper method to show sort options for CSV data
+  void _showSortOptions(BuildContext context, StateSetter setState, List<List<dynamic>> data, List<List<TextEditingController>> controllers) {
+    int selectedColumn = 0;
+    bool ascending = true;
+    
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => AlertDialog(
+          title: const Text('Sort Data'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<int>(
+                decoration: const InputDecoration(
+                  labelText: 'Column',
+                ),
+                value: selectedColumn,
+                items: List.generate(
+                  data.isEmpty ? 0 : data[0].length,
+                  (index) => DropdownMenuItem<int>(
+                    value: index,
+                    child: Text(
+                      data.isNotEmpty && data[0].length > index ? 
+                        'Column ${index + 1}: ${data[0][index]}' : 
+                        'Column ${index + 1}'
+                    ),
+                  ),
+                ),
+                onChanged: (value) {
+                  setModalState(() {
+                    selectedColumn = value ?? 0;
+                  });
+                },
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  const Text('Order:'),
+                  const SizedBox(width: 16),
+                  ChoiceChip(
+                    label: const Text('Ascending'),
+                    selected: ascending,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setModalState(() {
+                          ascending = true;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: const Text('Descending'),
+                    selected: !ascending,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setModalState(() {
+                          ascending = false;
+                        });
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                // Apply sorting
+                if (data.length > 1) {
+                  // Keep header row (if exists)
+                  final headerRow = data.isNotEmpty ? List<dynamic>.from(data[0]) : <dynamic>[];
+                  final headerControllers = controllers.isNotEmpty 
+                      ? List<TextEditingController>.from(controllers[0]) 
+                      : <TextEditingController>[];
+                  
+                  // Sort data rows (excluding header)
+                  final dataRows = data.sublist(1);
+                  final dataControllers = controllers.sublist(1);
+                  
+                  // Perform the sort
+                  final sortedData = List<List<dynamic>>.from(dataRows);
+                  final sortedControllers = List<List<TextEditingController>>.from(dataControllers);
+                  
+                  // Sort both arrays together based on selectedColumn
+                  for (int i = 0; i < sortedData.length - 1; i++) {
+                    for (int j = 0; j < sortedData.length - i - 1; j++) {
+                      var val1 = sortedData[j].length > selectedColumn ? 
+                                sortedData[j][selectedColumn].toString() : '';
+                      var val2 = sortedData[j + 1].length > selectedColumn ? 
+                                sortedData[j + 1][selectedColumn].toString() : '';
+                      
+                      // Try to parse as numbers if possible
+                      double? num1, num2;
+                      try {
+                        num1 = double.parse(val1);
+                        num2 = double.parse(val2);
+                        // Use numeric comparison
+                        if ((num1 > num2) == ascending) {
+                          // Swap data rows
+                          final tempData = sortedData[j];
+                          sortedData[j] = sortedData[j + 1];
+                          sortedData[j + 1] = tempData;
+                          
+                          // Swap controller rows
+                          final tempController = sortedControllers[j];
+                          sortedControllers[j] = sortedControllers[j + 1];
+                          sortedControllers[j + 1] = tempController;
+                        }
+                      } catch (e) {
+                        // Use string comparison
+                        if ((val1.compareTo(val2) > 0) == ascending) {
+                          // Swap data rows
+                          final tempData = sortedData[j];
+                          sortedData[j] = sortedData[j + 1];
+                          sortedData[j + 1] = tempData;
+                          
+                          // Swap controller rows
+                          final tempController = sortedControllers[j];
+                          sortedControllers[j] = sortedControllers[j + 1];
+                          sortedControllers[j + 1] = tempController;
+                        }
+                      }
+                    }
+                  }
+                  
+                  // Update the data with header + sorted data
+                  setState(() {
+                    data.clear();
+                    controllers.clear();
+                    
+                    // Add header row back
+                    if (headerRow.isNotEmpty) {
+                      data.add(headerRow);
+                      controllers.add(headerControllers);
+                    }
+                    
+                    // Add sorted data
+                    data.addAll(sortedData);
+                    controllers.addAll(sortedControllers);
+                  });
+                }
+                
+                Navigator.pop(context);
+              },
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  // Helper method to show filter options for CSV data
+  void _showFilterOptions(BuildContext context, StateSetter setState, List<List<dynamic>> data, List<List<TextEditingController>> controllers) {
+    int selectedColumn = 0;
+    String filterText = '';
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Filter Data'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<int>(
+              decoration: const InputDecoration(
+                labelText: 'Column',
+              ),
+              value: selectedColumn,
+              items: List.generate(
+                data.isEmpty ? 0 : data[0].length,
+                (index) => DropdownMenuItem<int>(
+                  value: index,
+                  child: Text(
+                    data.isNotEmpty && data[0].length > index ? 
+                      'Column ${index + 1}: ${data[0][index]}' : 
+                      'Column ${index + 1}'
+                  ),
+                ),
+              ),
+              onChanged: (value) {
+                selectedColumn = value ?? 0;
+              },
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              decoration: const InputDecoration(
+                labelText: 'Contains Text',
+                hintText: 'Enter filter text',
+              ),
+              onChanged: (value) {
+                filterText = value;
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              // Apply filtering
+              if (data.length > 1 && filterText.isNotEmpty) {
+                // Keep header row (if exists)
+                final headerRow = data.isNotEmpty ? List<dynamic>.from(data[0]) : <dynamic>[];
+                final headerControllers = controllers.isNotEmpty 
+                    ? List<TextEditingController>.from(controllers[0]) 
+                    : <TextEditingController>[];
+                
+                // Filter data rows (excluding header)
+                final dataRows = data.sublist(1);
+                final dataControllers = controllers.sublist(1);
+                
+                // Create filtered lists
+                final filteredData = <List<dynamic>>[];
+                final filteredControllers = <List<TextEditingController>>[];
+                
+                // Apply filter
+                for (int i = 0; i < dataRows.length; i++) {
+                  if (dataRows[i].length > selectedColumn) {
+                    final cellValue = dataRows[i][selectedColumn].toString().toLowerCase();
+                    if (cellValue.contains(filterText.toLowerCase())) {
+                      filteredData.add(dataRows[i]);
+                      filteredControllers.add(dataControllers[i]);
+                    }
+                  }
+                }
+                
+                // Update the data with header + filtered data
+                setState(() {
+                  data.clear();
+                  controllers.clear();
+                  
+                  // Add header row back
+                  if (headerRow.isNotEmpty) {
+                    data.add(headerRow);
+                    controllers.add(headerControllers);
+                  }
+                  
+                  // Add filtered data
+                  data.addAll(filteredData);
+                  controllers.addAll(filteredControllers);
+                });
+              }
+              
+              Navigator.pop(context);
+            },
+            child: const Text('Apply'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // Method to import CSV data
+  void _importCsvData(BuildContext context, StateSetter setState, List<List<TextEditingController>> controllers) {
+    // Show a dialog to get CSV input
+    final textController = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Import CSV Data'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Paste CSV data below:'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: textController,
+              maxLines: 10,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                hintText: 'name,email,phone\njohn,john@example.com,123-456-7890',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              // Parse the CSV input
+              final csvText = textController.text;
+              if (csvText.isNotEmpty) {
+                final rows = csvText.split('\n')
+                  .where((line) => line.trim().isNotEmpty)
+                  .map((line) => line.split(',').map((cell) => cell.trim()).toList())
+                  .toList();
+                
+                if (rows.isNotEmpty) {
+                  setState(() {
+                    // Create new controllers for each cell
+                    final newControllers = <List<TextEditingController>>[];
+                    for (final row in rows) {
+                      final rowControllers = <TextEditingController>[];
+                      for (final cell in row) {
+                        rowControllers.add(TextEditingController(text: cell));
+                      }
+                      newControllers.add(rowControllers);
+                    }
+                    
+                    // Update controllers with new data
+                    controllers.clear();
+                    controllers.addAll(newControllers);
+                  });
+                }
+              }
+              
+              Navigator.pop(context);
+            },
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // Method to export CSV data
+  void _exportCsvData(List<List<dynamic>> data) {
+    // Convert data to CSV format
+    final buffer = StringBuffer();
+    for (final row in data) {
+      final formattedRow = row.map((cell) {
+        if (cell.toString().contains(',') || cell.toString().contains('"')) {
+          return '"${cell.toString().replaceAll('"', '""')}"';
+        } else {
+          return cell.toString();
+        }
+      }).join(',');
+      buffer.writeln(formattedRow);
+    }
+    
+    // Copy to clipboard
+    Clipboard.setData(ClipboardData(text: buffer.toString())).then((_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('CSV data copied to clipboard')),
+      );
+    });
+  }
+  
+  // Method to save CSV data to file
   Future<void> _saveCsvData(List<List<dynamic>> data) async {
     try {
       // Create Excel object
@@ -1401,6 +2156,14 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       // Save to file
       await _localFile!.writeAsBytes(bytes);
       
+      // Also update the text controller with CSV content for text viewing
+      final buffer = StringBuffer();
+      for (final row in data) {
+        final rowStr = row.map((cell) => cell.toString()).join(',');
+        buffer.writeln(rowStr);
+      }
+      _contentController.text = buffer.toString();
+      
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('CSV data saved successfully')),
       );
@@ -1415,7 +2178,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       );
     }
   }
-
+  
   Widget _buildDocxViewer() {
     if (_localFile == null) {
       developer.log('No _localFile set for DOCX viewing', name: 'DocumentDetailScreen');
@@ -2228,7 +2991,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
           }
         } else if (char == ',' && !inQuotes) {
           // End of field
-          fields.add(currentField.toString());
+          fields.add(currentField.toString().trim());
           currentField = StringBuffer();
         } else {
           currentField.write(char);
@@ -2236,7 +2999,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
       }
       
       // Add the last field
-      fields.add(currentField.toString());
+      fields.add(currentField.toString().trim());
       return fields;
     } catch (e) {
       // Simple fallback - just split by commas
@@ -2247,6 +3010,10 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
   // Apply a template based on document type and template name
   void _applyTemplate(String templateName) {
     try {
+      setState(() {
+        _isLoadingContent = true;
+      });
+      
       switch (_currentDocument?.type ?? widget.document.type) {
         case DocumentType.csv:
           _applyCsvTemplate(templateName);
@@ -2261,16 +3028,23 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
           // No template to apply for unknown types
           _contentController.text = '';
       }
+      
+      setState(() {
+        _isLoadingContent = false;
+      });
     } catch (e) {
       developer.log('Error applying template: $e', name: 'DocumentDetailScreen');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to apply template: $e')),
       );
       _contentController.text = '';
+      setState(() {
+        _isLoadingContent = false;
+      });
     }
   }
   
-  // Apply CSV template
+  // Apply CSV template with enhanced options
   void _applyCsvTemplate(String templateName) {
     final StringBuffer buffer = StringBuffer();
     
@@ -2292,6 +3066,12 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
         buffer.writeln('2023-01-15,Office Supplies,Expense,0.00,125.50,874.50');
         buffer.writeln('2023-01-20,Client Payment,Income,500.00,0.00,1374.50');
         break;
+      case 'Project Planning':
+        buffer.writeln('Task ID,Task Name,Assigned To,Start Date,Due Date,Status,Priority,Completion %');
+        buffer.writeln('1,Project Setup,John Smith,2023-01-01,2023-01-05,Completed,High,100');
+        buffer.writeln('2,Requirements Gathering,Jane Doe,2023-01-06,2023-01-15,In Progress,High,75');
+        buffer.writeln('3,Design Phase,Mike Johnson,2023-01-16,2023-01-30,Not Started,Medium,0');
+        break;
       default:
         // Blank template with example headers
         buffer.writeln('Column1,Column2,Column3');
@@ -2299,10 +3079,33 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
     }
     
     _contentController.text = buffer.toString();
+    
+    // Also create a file for the template to allow direct viewing/editing with Excel
+    _createCsvFile(_contentController.text);
   }
   
-  // Apply DOCX template
-  void _applyDocxTemplate(String templateName) {
+  // Create a CSV file from content
+  Future<void> _createCsvFile(String content) async {
+    try {
+      final directory = await getTemporaryDirectory();
+      final String fileName = 'template_${DateTime.now().millisecondsSinceEpoch}.csv';
+      final File file = File('${directory.path}/$fileName');
+      
+      await file.writeAsString(content);
+      
+      // Update local file reference
+      setState(() {
+        _localFile = file;
+      });
+      
+      developer.log('Created CSV template file at: ${file.path}', name: 'DocumentDetailScreen');
+    } catch (e) {
+      developer.log('Error creating CSV file: $e', name: 'DocumentDetailScreen');
+    }
+  }
+  
+  // Apply DOCX template with enhanced options
+  void _applyDocxTemplate(String templateName) async {
     switch (templateName) {
       case 'Letter':
         _contentController.text = '''[Your Name]
@@ -2404,13 +3207,127 @@ Location: [Location]
 Minutes submitted by: [Name]
 Minutes approved by: [Name]''';
         break;
+      case 'Project Proposal':
+        _contentController.text = '''PROJECT PROPOSAL
+
+Project Title: [Project Title]
+Prepared By: [Your Name]
+Date: [Current Date]
+
+1. EXECUTIVE SUMMARY
+[Brief overview of the project and its objectives]
+
+2. PROJECT BACKGROUND
+[Provide context and background information]
+
+3. OBJECTIVES
+• [Objective 1]
+• [Objective 2]
+• [Objective 3]
+
+4. SCOPE
+[Define what is included and excluded from the project]
+
+5. TIMELINE
+[List major milestones and deadlines]
+
+6. BUDGET
+[Provide budget details and cost estimates]
+
+7. TEAM
+[List team members and their roles]
+
+8. RISKS AND MITIGATION
+[Identify potential risks and mitigation strategies]
+
+9. SUCCESS CRITERIA
+[Define how success will be measured]
+
+10. APPROVAL
+[Space for signatures and approval]''';
+        break;
       default:
         // Blank template
         _contentController.text = 'Enter your document content here.';
     }
+    
+    // Also create a DOCX file for the template
+    await _createDocxFile(_contentController.text);
   }
   
-  // Apply PDF template using syncfusion_flutter_pdf
+  // Create a DOCX file from content
+  Future<void> _createDocxFile(String content) async {
+    try {
+      // Create a minimal DOCX template
+      final bytes = await _createMinimalDocxTemplate(content);
+      
+      // Save to a temporary file
+      final tempDir = await getTemporaryDirectory();
+      final String fileName = '${tempDir.path}/template_${DateTime.now().millisecondsSinceEpoch}.docx';
+      final File file = File(fileName);
+      await file.writeAsBytes(bytes);
+      
+      // Update local file reference
+      setState(() {
+        _localFile = file;
+      });
+      
+      developer.log('Created DOCX template file at: ${file.path}', name: 'DocumentDetailScreen');
+    } catch (e) {
+      developer.log('Error creating DOCX file: $e', name: 'DocumentDetailScreen');
+    }
+  }
+  
+  // Create a minimal DOCX template with content
+  Future<List<int>> _createMinimalDocxTemplate([String content = '']) async {
+    try {
+      // In a real implementation, we would use docx_template to create a proper DOCX file
+      // For this example, we'll create a simple template that replaces {{content}} with our content
+      
+      // Try to load a base template if available
+      final docxBytes = await _getEmptyDocxTemplate();
+      
+      // Create a DocX template
+      final docx = await DocxTemplate.fromBytes(docxBytes);
+      
+      // Create content object for the template
+      final docContent = Content();
+      docContent.add(TextContent("content", content));
+      
+      // Generate the document
+      final bytes = await docx.generate(docContent);
+      if (bytes == null) {
+        throw Exception('Failed to generate DOCX document');
+      }
+      
+      return bytes;
+    } catch (e) {
+      developer.log('Error creating DOCX template: $e', name: 'DocumentDetailScreen');
+      
+      // Return a simple DOCX bytes array as fallback
+      // This is a placeholder and would need to be replaced with a proper DOCX in production
+      final List<int> minimalDocxBytes = [
+        80, 75, 3, 4, 20, 0, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+        20, 0, 0, 0, 119, 111, 114, 100, 47, 100, 111, 99, 117, 109, 101, 110, 116, 46, 120, 109, 108, 
+        60, 119, 58, 100, 111, 99, 117, 109, 101, 110, 116, 32, 120, 109, 108, 110, 115, 58, 119, 61, 
+        34, 104, 116, 116, 112, 58, 47, 47, 115, 99, 104, 101, 109, 97, 115, 46, 111, 112, 101, 110, 120, 
+        109, 108, 102, 111, 114, 109, 97, 116, 115, 46, 111, 114, 103, 47, 119, 111, 114, 100, 112, 114, 
+        111, 99, 101, 115, 115, 105, 110, 103, 109, 108, 47, 50, 48, 48, 54, 47, 109, 97, 105, 110, 34, 
+        62, 60, 119, 58, 98, 111, 100, 121, 62, 60, 119, 58, 112, 62, 123, 123, 99, 111, 110, 116, 101, 
+        110, 116, 125, 125, 60, 47, 119, 58, 112, 62, 60, 47, 119, 58, 98, 111, 100, 121, 62, 60, 47, 
+        119, 58, 100, 111, 99, 117, 109, 101, 110, 116, 62
+      ];
+      
+      return minimalDocxBytes;
+    } catch (e) {
+      developer.log('Error creating minimal DOCX template: $e', name: 'DocumentDetailScreen');
+      
+      // Return absolute minimal bytes for a DOCX file (not valid, just placeholders)
+      return [80, 75, 3, 4, 20, 0, 0, 0, 8, 0];
+    }
+  }
+  
+  // Apply PDF template with enhanced options using syncfusion_flutter_pdf
   void _applyPdfTemplate(String templateName) async {
     try {
       // Initialize with placeholder text while we generate the PDF
@@ -2425,11 +3342,16 @@ Minutes approved by: [Name]''';
       // Get graphics for drawing
       final PdfGraphics graphics = page.graphics;
       
-      // Create a font
+      // Create fonts
       final PdfFont headerFont = PdfStandardFont(PdfFontFamily.helvetica, 16, style: PdfFontStyle.bold);
+      final PdfFont titleFont = PdfStandardFont(PdfFontFamily.helvetica, 14, style: PdfFontStyle.bold);
       final PdfFont normalFont = PdfStandardFont(PdfFontFamily.helvetica, 12);
+      final PdfFont smallFont = PdfStandardFont(PdfFontFamily.helvetica, 10);
       
+      // Create brush for text
       PdfBrush brush = PdfSolidBrush(PdfColor(0, 0, 0));
+      
+      // Variable to store document description
       String content = '';
       
       switch (templateName) {
@@ -2441,7 +3363,7 @@ Minutes approved by: [Name]''';
             format: PdfStringFormat(alignment: PdfTextAlignment.center)
           );
           
-          graphics.drawString('Company Name', PdfStandardFont(PdfFontFamily.helvetica, 14, style: PdfFontStyle.bold),
+          graphics.drawString('Company Name', titleFont,
             brush: brush,
             bounds: const Rect.fromLTWH(0, 60, 500, 30)
           );
@@ -2494,7 +3416,7 @@ Sincerely,
             format: PdfStringFormat(alignment: PdfTextAlignment.center)
           );
           
-          graphics.drawString('Company Name', PdfStandardFont(PdfFontFamily.helvetica, 14, style: PdfFontStyle.bold),
+          graphics.drawString('Company Name', titleFont,
             brush: brush,
             bounds: const Rect.fromLTWH(0, 60, 250, 30)
           );
@@ -2509,7 +3431,7 @@ Sincerely,
             bounds: const Rect.fromLTWH(300, 90, 200, 60)
           );
           
-          graphics.drawString('BILL TO:', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+          graphics.drawString('BILL TO:', titleFont,
             brush: brush,
             bounds: const Rect.fromLTWH(0, 170, 200, 20)
           );
@@ -2526,22 +3448,22 @@ Sincerely,
             bounds: const Rect.fromLTWH(0, 290, 500, 30)
           );
           
-          graphics.drawString('Description', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+          graphics.drawString('Description', titleFont,
             brush: PdfSolidBrush(PdfColor(0, 0, 0)),
             bounds: const Rect.fromLTWH(10, 295, 250, 20)
           );
           
-          graphics.drawString('Qty', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+          graphics.drawString('Qty', titleFont,
             brush: PdfSolidBrush(PdfColor(0, 0, 0)),
             bounds: const Rect.fromLTWH(270, 295, 40, 20)
           );
           
-          graphics.drawString('Unit Price', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+          graphics.drawString('Unit Price', titleFont,
             brush: PdfSolidBrush(PdfColor(0, 0, 0)),
             bounds: const Rect.fromLTWH(340, 295, 70, 20)
           );
           
-          graphics.drawString('Amount', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+          graphics.drawString('Amount', titleFont,
             brush: PdfSolidBrush(PdfColor(0, 0, 0)),
             bounds: const Rect.fromLTWH(430, 295, 70, 20)
           );
@@ -2579,12 +3501,12 @@ Sincerely,
             Offset(500, y.toDouble())
           );
           
-          graphics.drawString('Total:', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+          graphics.drawString('Total:', titleFont,
             brush: brush,
             bounds: Rect.fromLTWH(340, y + 10.toDouble(), 70, 20)
           );
           
-          graphics.drawString('\$300.00', PdfStandardFont(PdfFontFamily.helvetica, 12, style: PdfFontStyle.bold),
+          graphics.drawString('\$300.00', titleFont,
             brush: brush,
             bounds: Rect.fromLTWH(430, y + 10.toDouble(), 70, 20)
           );
@@ -2600,7 +3522,7 @@ Sincerely,
             format: PdfStringFormat(alignment: PdfTextAlignment.center)
           );
           
-          graphics.drawString('[Report Title]', PdfStandardFont(PdfFontFamily.helvetica, 16),
+          graphics.drawString('[Report Title]', titleFont,
             brush: brush,
             bounds: const Rect.fromLTWH(0, 60, 500, 30),
             format: PdfStringFormat(alignment: PdfTextAlignment.center)
@@ -2618,7 +3540,7 @@ Sincerely,
             Offset(page.getClientSize().width, 150)
           );
           
-          graphics.drawString('1. INTRODUCTION', PdfStandardFont(PdfFontFamily.helvetica, 14, style: PdfFontStyle.bold),
+          graphics.drawString('1. INTRODUCTION', titleFont,
             brush: brush,
             bounds: const Rect.fromLTWH(0, 170, 500, 30)
           );
@@ -2628,7 +3550,7 @@ Sincerely,
             bounds: const Rect.fromLTWH(0, 200, 500, 60)
           );
           
-          graphics.drawString('2. FINDINGS', PdfStandardFont(PdfFontFamily.helvetica, 14, style: PdfFontStyle.bold),
+          graphics.drawString('2. FINDINGS', titleFont,
             brush: brush,
             bounds: const Rect.fromLTWH(0, 270, 500, 30)
           );
@@ -2638,7 +3560,7 @@ Sincerely,
             bounds: const Rect.fromLTWH(0, 300, 500, 60)
           );
           
-          graphics.drawString('3. CONCLUSION', PdfStandardFont(PdfFontFamily.helvetica, 14, style: PdfFontStyle.bold),
+          graphics.drawString('3. CONCLUSION', titleFont,
             brush: brush,
             bounds: const Rect.fromLTWH(0, 370, 500, 30)
           );
@@ -2649,6 +3571,97 @@ Sincerely,
           );
           
           content = 'Report template created';
+          break;
+          
+        case 'Certificate':
+          // Draw a certificate template
+          // Add a border
+          graphics.drawRectangle(
+            pen: PdfPen(PdfColor(0, 0, 128), width: 3),
+            bounds: Rect.fromLTWH(20, 20, page.getClientSize().width - 40, page.getClientSize().height - 40)
+          );
+          
+          // Inner decorative border
+          graphics.drawRectangle(
+            pen: PdfPen(PdfColor(0, 0, 128), width: 1),
+            bounds: Rect.fromLTWH(30, 30, page.getClientSize().width - 60, page.getClientSize().height - 60)
+          );
+          
+          // Title
+          graphics.drawString('CERTIFICATE', 
+            PdfStandardFont(PdfFontFamily.helvetica, 24, style: PdfFontStyle.bold),
+            brush: PdfSolidBrush(PdfColor(0, 0, 128)),
+            bounds: Rect.fromLTWH(0, 80, page.getClientSize().width, 40),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          graphics.drawString('OF ACHIEVEMENT', 
+            PdfStandardFont(PdfFontFamily.helvetica, 18, style: PdfFontStyle.bold),
+            brush: PdfSolidBrush(PdfColor(0, 0, 128)),
+            bounds: Rect.fromLTWH(0, 120, page.getClientSize().width, 30),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          // Certificate text
+          graphics.drawString('This certifies that', 
+            normalFont,
+            brush: brush,
+            bounds: Rect.fromLTWH(0, 180, page.getClientSize().width, 30),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          // Recipient name place
+          graphics.drawString('[Recipient Name]', 
+            PdfStandardFont(PdfFontFamily.helvetica, 18, style: PdfFontStyle.bold),
+            brush: brush,
+            bounds: Rect.fromLTWH(0, 220, page.getClientSize().width, 40),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          // Achievement description
+          graphics.drawString('has successfully completed [Achievement Description]', 
+            normalFont,
+            brush: brush,
+            bounds: Rect.fromLTWH(0, 270, page.getClientSize().width, 30),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          // Date line
+          graphics.drawString('Awarded on [Date]', 
+            normalFont,
+            brush: brush,
+            bounds: Rect.fromLTWH(0, 320, page.getClientSize().width, 30),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          // Signature lines
+          graphics.drawLine(
+            PdfPen(PdfColor(0, 0, 0)),
+            Offset(100, 400),
+            Offset(250, 400)
+          );
+          
+          graphics.drawLine(
+            PdfPen(PdfColor(0, 0, 0)),
+            Offset(page.getClientSize().width - 250, 400),
+            Offset(page.getClientSize().width - 100, 400)
+          );
+          
+          graphics.drawString('[Signature 1]', 
+            smallFont,
+            brush: brush,
+            bounds: Rect.fromLTWH(100, 410, 150, 20),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          graphics.drawString('[Signature 2]', 
+            smallFont,
+            brush: brush,
+            bounds: Rect.fromLTWH(page.getClientSize().width - 250, 410, 150, 20),
+            format: PdfStringFormat(alignment: PdfTextAlignment.center)
+          );
+          
+          content = 'Certificate template created';
           break;
           
         default:
@@ -2673,7 +3686,7 @@ Sincerely,
       
       // Save to a temporary file
       final tempDir = await getTemporaryDirectory();
-      final String fileName = '${tempDir.path}/${_nameController.text}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final String fileName = '${tempDir.path}/${_nameController.text.isNotEmpty ? _nameController.text : "document"}_${DateTime.now().millisecondsSinceEpoch}.pdf';
       final File file = File(fileName);
       await file.writeAsBytes(bytes);
       
@@ -2712,11 +3725,18 @@ Sincerely,
           _contentController.text = fileContent;
           
           // Also try to parse with Excel to verify it's valid
-          await _parseCsvWithExcel();
+          final data = await _parseCsvWithExcel(file);
+          
+          if (data.isEmpty) {
+            developer.log('CSV file is empty or could not be parsed', name: 'DocumentDetailScreen');
+            // Keep the text content but log a warning
+          }
         } catch (e) {
           developer.log('Error reading CSV file: $e', name: 'DocumentDetailScreen');
           _contentController.text = '[This CSV file could not be read as text. It might be corrupted or in an unsupported format.]';
         }
+      } else {
+        throw Exception('CSV file does not exist at path: $filePath');
       }
     } catch (e) {
       developer.log('Error loading CSV content: $e', name: 'DocumentDetailScreen');
@@ -2731,18 +3751,21 @@ Sincerely,
       if (file.existsSync()) {
         try {
           // For DOCX files, we can't easily display the content as text
-          // So we just set a placeholder message
+          // So we first set a placeholder message
           _contentController.text = '[This document contains binary DOCX content that can only be viewed in the appropriate viewer.]';
           
           // We'll extract content when viewing
-          final extracted = await _extractDocxContent();
+          final extracted = await _extractDocxContent(file);
           if (extracted.isNotEmpty) {
+            // Join the extracted content with newlines for display
             _contentController.text = extracted.join('\n\n');
           }
         } catch (e) {
           developer.log('Error reading DOCX file: $e', name: 'DocumentDetailScreen');
           _contentController.text = '[This DOCX file could not be read. It might be corrupted or in an unsupported format.]';
         }
+      } else {
+        throw Exception('DOCX file does not exist at path: $filePath');
       }
     } catch (e) {
       developer.log('Error loading DOCX content: $e', name: 'DocumentDetailScreen');
@@ -2768,6 +3791,8 @@ Sincerely,
           developer.log('Error reading PDF file: $e', name: 'DocumentDetailScreen');
           _contentController.text = '[This PDF file could not be read. It might be corrupted or in an unsupported format.]';
         }
+      } else {
+        throw Exception('PDF file does not exist at path: $filePath');
       }
     } catch (e) {
       developer.log('Error loading PDF content: $e', name: 'DocumentDetailScreen');
@@ -2787,6 +3812,8 @@ Sincerely,
           developer.log('Could not read file as text: $e', name: 'DocumentDetailScreen');
           _contentController.text = '[This document contains binary content that can only be viewed in the appropriate viewer.]';
         }
+      } else {
+        throw Exception('File does not exist at path: $filePath');
       }
     } catch (e) {
       developer.log('Error loading generic content: $e', name: 'DocumentDetailScreen');
@@ -2976,38 +4003,6 @@ Sincerely,
     } catch (e) {
       developer.log('Error getting empty DOCX template: $e', name: 'DocumentDetailScreen');
       throw Exception('Failed to create DOCX template: $e');
-    }
-  }
-
-  Future<List<int>> _createMinimalDocxTemplate() async {
-    // In a real app, we would have an actual DOCX template
-    // For this example, we'll create a basic minimal DOCX template in code
-    
-    try {
-      // Create a minimal in-memory DOCX file
-      // This is a very simplified binary representation
-      // In a real app, you would use a proper template file
-      
-      // These bytes represent a minimal valid but empty DOCX file
-      // This is just for testing purposes
-      final List<int> minimalDocxBytes = [
-        80, 75, 3, 4, 20, 0, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-        20, 0, 0, 0, 119, 111, 114, 100, 47, 100, 111, 99, 117, 109, 101, 110, 116, 46, 120, 109, 108, 
-        60, 119, 58, 100, 111, 99, 117, 109, 101, 110, 116, 32, 120, 109, 108, 110, 115, 58, 119, 61, 
-        34, 104, 116, 116, 112, 58, 47, 47, 115, 99, 104, 101, 109, 97, 115, 46, 111, 112, 101, 110, 120, 
-        109, 108, 102, 111, 114, 109, 97, 116, 115, 46, 111, 114, 103, 47, 119, 111, 114, 100, 112, 114, 
-        111, 99, 101, 115, 115, 105, 110, 103, 109, 108, 47, 50, 48, 48, 54, 47, 109, 97, 105, 110, 34, 
-        62, 60, 119, 58, 98, 111, 100, 121, 62, 60, 119, 58, 112, 62, 123, 123, 99, 111, 110, 116, 101, 
-        110, 116, 125, 125, 60, 47, 119, 58, 112, 62, 60, 47, 119, 58, 98, 111, 100, 121, 62, 60, 47, 
-        119, 58, 100, 111, 99, 117, 109, 101, 110, 116, 62
-      ];
-      
-      return minimalDocxBytes;
-    } catch (e) {
-      developer.log('Error creating minimal DOCX template: $e', name: 'DocumentDetailScreen');
-      
-      // Return absolute minimal bytes for a DOCX file (not valid, just placeholders)
-      return [80, 75, 3, 4, 20, 0, 0, 0, 8, 0];
     }
   }
 } 

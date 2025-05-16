@@ -32,19 +32,59 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _login() async {
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
-      final success = await _authService.login(
-        _usernameController.text,
-        _passwordController.text,
-      );
-      setState(() => _isLoading = false);
-      if (success && mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const MainScreen()), // Placeholder for now
+      try {
+        final success = await _authService.login(
+          _usernameController.text,
+          _passwordController.text,
         );
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Login Failed. Please check your credentials.')),
-        );
+        
+        setState(() => _isLoading = false);
+        
+        if (success && mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (context) => const MainScreen()),
+          );
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Login Failed. Please check your credentials.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } catch (e) {
+        setState(() => _isLoading = false);
+        
+        if (mounted) {
+          String errorMessage = 'Login failed.';
+          
+          // Handle specific error messages
+          if (e.toString().contains('Failed to connect to server')) {
+            errorMessage = 'Could not connect to server. Please check your internet connection.';
+          } else if (e.toString().contains('timed out')) {
+            errorMessage = 'Connection timed out. Server may be unavailable.';
+          } else if (e.toString().contains('Invalid response format')) {
+            errorMessage = 'Server response was invalid. Please contact support.';
+          } else {
+            // Use the exception message directly
+            errorMessage = e.toString().replaceAll('Exception: ', '');
+          }
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorMessage),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 5),
+              action: SnackBarAction(
+                label: 'OK',
+                textColor: Colors.white,
+                onPressed: () {
+                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                },
+              ),
+            ),
+          );
+        }
       }
     }
   }

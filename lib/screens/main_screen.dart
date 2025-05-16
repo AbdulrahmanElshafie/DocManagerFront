@@ -43,6 +43,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   Future<void> _checkAuthStatus() async {
     try {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+      
       // First check if already authenticated
       final isAuthenticated = await _authService.isAuthenticated();
       
@@ -56,10 +61,24 @@ class _AuthWrapperState extends State<AuthWrapper> {
             _isLoading = false;
           });
         } catch (e) {
-          // Handle token refresh error
+          // Handle token refresh error - show specific error
           setState(() {
             _isAuthenticated = false;
             _isLoading = false;
+            
+            // Format error message to be more user-friendly
+            String errorMsg = e.toString();
+            if (errorMsg.contains('Exception:')) {
+              errorMsg = errorMsg.replaceAll('Exception:', '').trim();
+            }
+            
+            if (errorMsg.contains('Failed to connect to server') || 
+                errorMsg.contains('Connection error') ||
+                errorMsg.contains('timed out')) {
+              _errorMessage = "Network error: $errorMsg\n\nPlease check your internet connection and try again.";
+            } else {
+              _errorMessage = "Authentication error: $errorMsg";
+            }
           });
         }
       } else {
