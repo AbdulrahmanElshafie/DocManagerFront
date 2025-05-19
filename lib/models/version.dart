@@ -7,6 +7,8 @@ class Version extends Document {
   final String modifiedBy;
   final String? comment;
   final int versionNumber;
+  final DateTime? lastModified;
+  final int size;
 
   Version({
     required this.modifiedBy,
@@ -21,10 +23,9 @@ class Version extends Document {
     required super.folderId,
     required super.ownerId,
     required super.createdAt,
-    super.lastModified,
     super.updatedAt,
-    required super.size,
-    super.content,
+    this.lastModified,
+    this.size = 0,
   });
 
   factory Version.fromJson(Map<String, dynamic> json) {
@@ -45,6 +46,16 @@ class Version extends Document {
       }
     }
     
+    // Extract the lastModified date and size
+    DateTime? lastModified;
+    if (json['lastModified'] != null) {
+      lastModified = DateTime.parse(json['lastModified']);
+    } else if (json['updated_at'] != null) {
+      lastModified = DateTime.parse(json['updated_at']);
+    }
+    
+    int size = json['size'] ?? 0;
+    
     return Version(
       id: json['id'],
       name: json['name'],
@@ -55,16 +66,14 @@ class Version extends Document {
       ownerId: json['ownerId'] ?? json['owner'] ?? '',
       createdAt: json['createdAt'] != null ? DateTime.parse(json['createdAt']) : 
                  json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
-      lastModified: json['lastModified'] != null ? DateTime.parse(json['lastModified']) : 
-                   json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null,
       updatedAt: json['updatedAt'] != null ? DateTime.parse(json['updatedAt']) : 
                 json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null,
-      size: json['size'] ?? 0,
+      lastModified: lastModified,
+      size: size,
       versionId: json['versionId'] ?? json['version_id'] ?? '',
       modifiedBy: json['modifiedBy'] ?? json['modified_by'] ?? '',
       comment: json['comment'],
       versionNumber: json['versionNumber'] ?? json['version_number'] ?? 1,
-      content: json['content'],
     );
   }
 
@@ -92,6 +101,8 @@ class Version extends Document {
     'modifiedBy': modifiedBy,
     'comment': comment,
     'versionNumber': versionNumber,
+    'lastModified': lastModified?.toIso8601String(),
+    'size': size,
   };
 
   @override
@@ -104,10 +115,9 @@ class Version extends Document {
     String? folderId,
     String? ownerId,
     DateTime? createdAt,
-    DateTime? lastModified,
     DateTime? updatedAt,
+    DateTime? lastModified,
     int? size,
-    String? content,
     String? comment,
     String? modifiedBy,
     String? versionId,
@@ -122,10 +132,9 @@ class Version extends Document {
       folderId: folderId ?? this.folderId,
       ownerId: ownerId ?? this.ownerId,
       createdAt: createdAt ?? this.createdAt,
-      lastModified: lastModified ?? this.lastModified,
       updatedAt: updatedAt ?? this.updatedAt,
+      lastModified: lastModified ?? this.lastModified,
       size: size ?? this.size,
-      content: content ?? this.content,
       comment: comment ?? this.comment,
       modifiedBy: modifiedBy ?? this.modifiedBy,
       versionId: versionId ?? this.versionId,
@@ -140,5 +149,7 @@ class Version extends Document {
         modifiedBy,
         comment,
         versionNumber,
+        lastModified,
+        size,
       ];
 }
