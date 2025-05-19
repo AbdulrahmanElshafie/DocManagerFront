@@ -768,7 +768,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> with Single
                 const SizedBox(height: 16),
                 const Divider(),
                 const SizedBox(height: 16),
-                Text(version.content ?? 'No content'),
+                Text("Tesdt" ?? 'No content'),
               ],
             ),
           ),

@@ -68,16 +68,19 @@ class DocumentService {
   /// Parse document file type
   DocumentType parseDocumentType(String filePath) {
     final extension = filePath.split('.').last.toLowerCase();
-    
+    print("filePath $filePath");
+    print('extension $extension');
     if (['txt', 'doc', 'docx', 'rtf'].contains(extension)) {
-      return DocumentType.text;
+      return DocumentType.docx;
     } else if (extension == 'pdf') {
       return DocumentType.pdf;
-    } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp'].contains(extension)) {
-      return DocumentType.image;
-    } else {
+    }
+    // } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp'].contains(extension)) {
+    //   return DocumentType.image;
+    // }
+    else {
       LoggerUtil.warning('Unknown document type for extension: $extension');
-      return DocumentType.text; // Default
+      return DocumentType.pdf; // Default
     }
   }
 } 

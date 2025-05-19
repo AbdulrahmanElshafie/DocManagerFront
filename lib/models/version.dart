@@ -8,7 +8,7 @@ class Version extends Document {
   final String? comment;
   final int versionNumber;
 
-  const Version({
+  Version({
     required this.modifiedBy,
     required this.versionId,
     this.comment,

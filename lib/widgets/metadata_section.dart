@@ -31,14 +31,14 @@ class MetadataSection extends StatelessWidget {
             _buildInfoRow('Name', document.name),
             _buildInfoRow('Type', _getDocumentTypeString(document.type)),
             _buildInfoRow('Created', document.createdAt.toString().split('.')[0]),
-            _buildInfoRow('Last Modified', document.lastModified?.toString().split('.')[0] ?? 'N/A'),
+            _buildInfoRow('Last Modified', document.updatedAt?.toString().split('.')[0] ?? 'N/A'),
             _buildInfoRow('Owner ID', document.ownerId),
             _buildInfoRow('Folder ID', document.folderId),
             
-            // Show file size if available
-            if (document.size > 0)
-              _buildInfoRow('Size', _formatFileSize(document.size)),
-            
+            // // Show file size if available
+            // if (document.size > 0)
+            //   _buildInfoRow('Size', _formatFileSize(document.size)),
+            //
             // Show file path if available
             if (document.filePath != null && document.filePath!.isNotEmpty)
               _buildInfoRow('Path', _formatFilePath(document.filePath!)),

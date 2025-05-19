@@ -343,6 +343,9 @@ class _FoldersScreenState extends State<FoldersScreen> {
                             case DocumentType.csv:
                               extension = '.csv';
                               break;
+                            case DocumentType.unsupported:
+                              extension = '';
+                              break;
                           }
                           
                           // Only update if no extension or different extension
@@ -431,6 +434,9 @@ class _FoldersScreenState extends State<FoldersScreen> {
                             case DocumentType.csv:
                               finalName = '$name.csv';
                               break;
+                            case DocumentType.unsupported:
+                              finalName = name;
+                              break;
                           }
                         } else if (
                           (extension != '.pdf' && _selectedDocType == DocumentType.pdf) ||
@@ -449,6 +455,9 @@ class _FoldersScreenState extends State<FoldersScreen> {
                             case DocumentType.csv:
                               finalName = '$nameWithoutExt.csv';
                               break;
+                            case DocumentType.unsupported:
+                              finalName = nameWithoutExt;
+                              break;
                           }
                         }
                         
@@ -463,6 +472,9 @@ class _FoldersScreenState extends State<FoldersScreen> {
                             break;
                           case DocumentType.pdf:
                             initialContent = 'This content will be converted to PDF format.';
+                            break;
+                          case DocumentType.unsupported:
+                            initialContent = '';
                             break;
                         }
                         

@@ -337,83 +337,90 @@ class DocumentRepository {
       // Parse document
       final document = Document.fromJson(response);
       
-      // If document has a file path but no content, fetch the content
-      if (document.filePath != null && document.filePath!.isNotEmpty && document.content == null) {
-        try {
-          developer.log('Fetching content for document: ${document.filePath}', name: 'DocumentRepository');
-          
-          // For file paths on the local system
-          if (!document.filePath!.startsWith('http://') && !document.filePath!.startsWith('https://')) {
-            try {
-              // Normalize path for Windows if needed
-              String normalizedPath = document.filePath!;
-              if (!kIsWeb && Platform.isWindows) {
-                normalizedPath = normalizedPath.replaceAll('\\', '/');
-              }
-              
-              final file = File(normalizedPath);
-              if (file.existsSync()) {
-                try {
-                  // Try to read content as text
-                  final fileContent = await file.readAsString();
-                  return document.copyWith(content: fileContent);
-                } catch (e) {
-                  // Binary content that can't be read as text
-                  developer.log('Could not read file as text: $e', name: 'DocumentRepository');
-                  return document.copyWith(
-                    content: '[This document contains binary content that can only be viewed in the appropriate viewer.]'
-                  );
-                }
-              } else {
-                developer.log('File does not exist: $normalizedPath', name: 'DocumentRepository');
-                return document.copyWith(
-                  content: 'File not found: $normalizedPath'
-                );
-              }
-            } catch (e) {
-              developer.log('Error handling local file path: $e', name: 'DocumentRepository');
-              return document.copyWith(
-                content: 'Error handling file path: $e'
-              );
-            }
-          } else {
-            // Network file
-            try {
-              final uri = Uri.parse(document.filePath!);
-              final contentResponse = await http.get(uri);
-              
-              if (contentResponse.statusCode == 200) {
-                // We got content, try to decode it based on document type
-                String? content;
-                try {
-                  content = utf8.decode(contentResponse.bodyBytes);
-                } catch (e) {
-                  developer.log('Failed to decode document content as UTF-8: $e', name: 'DocumentRepository');
-                  content = '[This document contains binary content that can only be viewed in the appropriate viewer.]';
-                }
-                
-                return document.copyWith(content: content);
-              } else {
-                developer.log('Failed to get document content: ${contentResponse.statusCode}', name: 'DocumentRepository');
-                return document.copyWith(
-                  content: 'Failed to load document content. Status code: ${contentResponse.statusCode}'
-                );
-              }
-            } catch (e) {
-              developer.log('Error fetching document content: $e', name: 'DocumentRepository');
-              return document.copyWith(
-                content: 'Error loading document content: $e'
-              );
-            }
-          }
-        } catch (e) {
-          developer.log('Error fetching document content: $e', name: 'DocumentRepository');
-          return document.copyWith(
-            content: 'Error loading document content: $e'
-          );
-        }
-      }
-      
+      // // If document has a file path but no content, fetch the content
+      // if (document.filePath != null && document.filePath!.isNotEmpty && document.file == null) {
+      //   try {
+      //     developer.log('Fetching content for document: ${document.filePath}', name: 'DocumentRepository');
+      //
+      //     // For file paths on the local system
+      //     if (!document.filePath!.startsWith('http://') && !document.filePath!.startsWith('https://')) {
+      //       try {
+      //         // Normalize path for Windows if needed
+      //         String normalizedPath = document.filePath!;
+      //         if (!kIsWeb && Platform.isWindows) {
+      //           normalizedPath = normalizedPath.replaceAll('\\', '/');
+      //         }
+      //
+      //         final file = File(normalizedPath);
+      //         if (file.existsSync()) {
+      //           try {
+      //             // Try to read content as text
+      //             final fileContent = await file.readAsString();
+      //             return document.copyWith(content: fileContent);
+      //           } catch (e) {
+      //             // Binary content that can't be read as text
+      //             developer.log('Could not read file as text: $e', name: 'DocumentRepository');
+      //             return document.copyWith(
+      //               content: '[This document contains binary content that can only be viewed in the appropriate viewer.]'
+      //             );
+      //           }
+      //         } else {
+      //           developer.log('File does not exist: $normalizedPath', name: 'DocumentRepository');
+      //           return document.copyWith(
+      //             content: 'File not found: $normalizedPath'
+      //           );
+      //         }
+      //       } catch (e) {
+      //         developer.log('Error handling local file path: $e', name: 'DocumentRepository');
+      //         return document.copyWith(
+      //           content: 'Error handling file path: $e'
+      //         );
+      //       }
+      //     } else {
+      //       // Network file
+      //       try {
+      //         final uri = Uri.parse(document.filePath!);
+      //         final contentResponse = await http.get(uri);
+      //
+      //         if (contentResponse.statusCode == 200) {
+      //           // We got content, try to decode it based on document type
+      //           String? content;
+      //           try {
+      //             // Get the temporary directory of the device
+      //             final tempDir = await getTemporaryDirectory();
+      //             final filePath = '${tempDir.path}/${document.name}.pdf';
+      //
+      //             // Write the binary data to a file
+      //             final file = File(filePath);
+      //             await file.writeAsBytes(contentResponse.bodyBytes);
+      //             document.file = file;
+      //           } catch (e) {
+      //             developer.log('Failed to decode document content as UTF-8: $e', name: 'DocumentRepository');
+      //             content = '[This document contains binary content that can only be viewed in the appropriate viewer.]';
+      //           }
+      //
+      //           return document.copyWith(content: content);
+      //         } else {
+      //           developer.log('Failed to get document content: ${contentResponse.statusCode}', name: 'DocumentRepository');
+      //           return document.copyWith(
+      //             content: 'Failed to load document content. Status code: ${contentResponse.statusCode}'
+      //           );
+      //         }
+      //       } catch (e) {
+      //         developer.log('Error fetching document content: $e', name: 'DocumentRepository');
+      //         return document.copyWith(
+      //           content: 'Error loading document content: $e'
+      //         );
+      //       }
+      //     }
+      //   } catch (e) {
+      //     developer.log('Error fetching document content: $e', name: 'DocumentRepository');
+      //     return document.copyWith(
+      //       content: 'Error loading document content: $e'
+      //     );
+      //   }
+      // }
+      //
       return document;
     } catch (e) {
       developer.log('Error getting document: $e', name: 'DocumentRepository');

@@ -7,24 +7,22 @@ enum DocumentType {
   pdf,
   csv,
   docx,
+  unsupported
 }
 
 class Document extends Equatable {
   final String id;
   final String name;
-  final File? file;
+  late File? file;
   final String? filePath;
   final DocumentType type;
   final String folderId;
   final String ownerId;
   final DateTime createdAt;
-  final DateTime? lastModified;
   final DateTime? updatedAt;
-  final int size;
-  final String? content;
 
 
-  const Document({
+   Document({
     required this.id,
     required this.name,
     this.file,
@@ -33,17 +31,13 @@ class Document extends Equatable {
     required this.folderId,
     required this.ownerId,
     required this.createdAt,
-    this.lastModified,
     this.updatedAt,
-    required this.size,
-    this.content,
   });
 
 
   factory Document.fromJson(Map<String, dynamic> json) {
     developer.log('Parsing document JSON: $json', name: 'Document.fromJson');
     
-    int fileSize = 0;
     File? fileObj;
     String? filePathStr;
 
@@ -57,7 +51,6 @@ class Document extends Equatable {
         if (!kIsWeb && filePathStr != null && filePathStr.isNotEmpty) {
           try {
             fileObj = File(filePathStr);
-            fileSize = fileObj.existsSync() ? fileObj.lengthSync() : 0;
           } catch (e) {
             developer.log('Error creating File object: $e', name: 'Document.fromJson');
             fileObj = null;
@@ -75,12 +68,9 @@ class Document extends Equatable {
       filePath: filePathStr,
       ownerId: json['owner'] ?? '',
       createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
-      lastModified: json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null,
       updatedAt: json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null,
       folderId: json['folder'] ?? '',
-      content: json['content'],
       type: _parseDocumentType(json['type']),
-      size: fileSize,
     );
   }
 
@@ -93,8 +83,9 @@ class Document extends Equatable {
       case 'docx':
         return DocumentType.docx;
       case 'pdf':
-      default:
         return DocumentType.pdf;
+      default:
+        return DocumentType.unsupported;
     }
   }
 
@@ -106,7 +97,6 @@ class Document extends Equatable {
     'created_at': createdAt.toIso8601String(),
     'updated_at': updatedAt?.toIso8601String(),
     'folder': folderId,
-    'content': content,
     'type': type.toString().split('.').last,
   };
 
@@ -122,7 +112,6 @@ class Document extends Equatable {
     DateTime? lastModified,
     DateTime? updatedAt,
     int? size,
-    String? content,
   }) {
     return Document(
       id: id ?? this.id,
@@ -133,10 +122,7 @@ class Document extends Equatable {
       folderId: folderId ?? this.folderId,
       ownerId: ownerId ?? this.ownerId,
       createdAt: createdAt ?? this.createdAt,
-      lastModified: lastModified ?? this.lastModified,
       updatedAt: updatedAt ?? this.updatedAt,
-      size: size ?? this.size,
-      content: content ?? this.content,
     );
   }
 
@@ -153,8 +139,6 @@ class Document extends Equatable {
       folderId: folderId,
       ownerId: '', // Will be set by the server
       createdAt: DateTime.now(),
-      size: 0,
-      content: '',
     );
   }
 
@@ -168,9 +152,6 @@ class Document extends Equatable {
         folderId,
         ownerId,
         createdAt,
-        lastModified,
         updatedAt,
-        size,
-        content,
       ];
 } 

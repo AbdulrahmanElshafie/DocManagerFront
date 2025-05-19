@@ -127,11 +127,11 @@ class _VersionsSectionState extends State<VersionsSection> {
                                         color: Colors.grey.shade600,
                                       ),
                                     ),
-                                    const SizedBox(height: 16),
-                                    if (version.content != null && version.content!.isNotEmpty)
-                                      Text(version.content!)
-                                    else
-                                      const Text('No content available for this version'),
+                                    // const SizedBox(height: 16),
+                                    // if (version.content != null && version.content!.isNotEmpty)
+                                    //   Text(version.content!)
+                                    // else
+                                    //   const Text('No content available for this version'),
                                   ],
                                 ),
                               ),
