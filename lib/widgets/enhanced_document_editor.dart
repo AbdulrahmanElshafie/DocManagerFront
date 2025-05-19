@@ -87,6 +87,11 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
     });
     
     try {
+      // Check if file exists first
+      if (!widget.file.existsSync()) {
+        throw Exception('File does not exist at path: ${widget.file.path}');
+      }
+      
       switch (_documentType) {
         case app_document.DocumentType.csv:
           await _loadCsvDocument();
@@ -101,7 +106,16 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
           await _loadDocxDocument();
           break;
         default:
-          throw Exception('Unsupported document type');
+          // For unsupported types, try to load as text
+          try {
+            final content = await widget.file.readAsString();
+            _docTextController.text = content;
+            setState(() {
+              _isLoading = false;
+            });
+          } catch (e) {
+            throw Exception('Unsupported document type and cannot read as text: $e');
+          }
       }
     } catch (e) {
       setState(() {

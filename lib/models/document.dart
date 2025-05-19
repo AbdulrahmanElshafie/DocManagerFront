@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:equatable/equatable.dart';
 import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:path/path.dart' as path;
 
 enum DocumentType {
   pdf,
@@ -50,6 +51,10 @@ class Document extends Equatable {
         // Only create a File object if we're not on web and path is valid
         if (!kIsWeb && filePathStr != null && filePathStr.isNotEmpty) {
           try {
+            // Normalize the file path for Windows
+            if (Platform.isWindows) {
+              filePathStr = filePathStr.replaceAll('\\', '/');
+            }
             fileObj = File(filePathStr);
           } catch (e) {
             developer.log('Error creating File object: $e', name: 'Document.fromJson');
@@ -61,6 +66,13 @@ class Document extends Equatable {
       }
     }
     
+    DocumentType docType = _parseDocumentType(json['type']);
+    
+    // Use file extension as a fallback for document type detection
+    if (docType == DocumentType.unsupported && filePathStr != null) {
+      docType = _inferTypeFromPath(filePathStr);
+    }
+    
     return Document(
       id: json['id'] ?? '',
       name: json['name'] ?? '',
@@ -70,22 +82,46 @@ class Document extends Equatable {
       createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
       updatedAt: json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null,
       folderId: json['folder'] ?? '',
-      type: _parseDocumentType(json['type']),
+      type: docType,
     );
   }
 
   static DocumentType _parseDocumentType(String? typeStr) {
-    if (typeStr == null) return DocumentType.pdf; // Default to PDF
+    if (typeStr == null) return DocumentType.unsupported;
     
     switch(typeStr.toLowerCase()) {
       case 'csv':
         return DocumentType.csv;
       case 'docx':
+      case 'doc':
+      case 'rtf':
+      case 'txt':
         return DocumentType.docx;
       case 'pdf':
         return DocumentType.pdf;
       default:
         return DocumentType.unsupported;
+    }
+  }
+
+  // Helper method to infer document type from file path
+  static DocumentType _inferTypeFromPath(String filePath) {
+    try {
+      final extension = path.extension(filePath).toLowerCase().replaceAll('.', '');
+      
+      if (['csv'].contains(extension)) {
+        return DocumentType.csv;
+      } else if (['pdf'].contains(extension)) {
+        return DocumentType.pdf;
+      } else if (['doc', 'docx', 'rtf', 'txt'].contains(extension)) {
+        return DocumentType.docx;
+      } else {
+        developer.log('Could not infer type from extension: $extension', name: 'Document._inferTypeFromPath');
+        return DocumentType.unsupported;
+      }
+    } catch (e) {
+      developer.log('Error inferring file type: $e', name: 'Document._inferTypeFromPath');
+      return DocumentType.unsupported;
     }
   }
 

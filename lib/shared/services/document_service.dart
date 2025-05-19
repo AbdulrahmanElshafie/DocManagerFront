@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:doc_manager/models/document.dart';
 import 'package:doc_manager/repository/document_repository.dart';
 import 'package:doc_manager/shared/utils/logger.dart';
+import 'package:path/path.dart' as path;
 
 class DocumentService {
   static final DocumentService _instance = DocumentService._internal();
@@ -67,20 +68,25 @@ class DocumentService {
 
   /// Parse document file type
   DocumentType parseDocumentType(String filePath) {
-    final extension = filePath.split('.').last.toLowerCase();
-    print("filePath $filePath");
-    print('extension $extension');
-    if (['txt', 'doc', 'docx', 'rtf'].contains(extension)) {
-      return DocumentType.docx;
-    } else if (extension == 'pdf') {
-      return DocumentType.pdf;
-    }
-    // } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp'].contains(extension)) {
-    //   return DocumentType.image;
-    // }
-    else {
-      LoggerUtil.warning('Unknown document type for extension: $extension');
-      return DocumentType.pdf; // Default
+    try {
+      // Use path.extension to correctly extract the file extension
+      final extension = path.extension(filePath).toLowerCase().replaceAll('.', '');
+      LoggerUtil.info("Parsed file extension: $extension from path: $filePath");
+      
+      if (['txt', 'doc', 'docx', 'rtf'].contains(extension)) {
+        return DocumentType.docx;
+      } else if (extension == 'csv') {
+        return DocumentType.csv;
+      } else if (extension == 'pdf') {
+        return DocumentType.pdf;
+      } else {
+        LoggerUtil.warning('Unknown document type for extension: $extension');
+        // If we can't determine the type, let's use the unsupported type
+        return DocumentType.unsupported;
+      }
+    } catch (e) {
+      LoggerUtil.error('Error parsing document type: $e');
+      return DocumentType.unsupported;
     }
   }
 } 
