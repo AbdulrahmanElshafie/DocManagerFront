@@ -55,7 +55,19 @@ class Document extends Equatable {
             if (Platform.isWindows) {
               filePathStr = filePathStr.replaceAll('\\', '/');
             }
-            fileObj = File(filePathStr);
+            
+            // Ensure the path isn't just the string "path" which can happen in error cases
+            if (filePathStr == "path" || filePathStr.trim().isEmpty) {
+              developer.log('Invalid file path received: $filePathStr', name: 'Document.fromJson');
+              filePathStr = null;
+            } else {
+              fileObj = File(filePathStr);
+              // Check if file exists to validate path - but don't throw if it doesn't
+              if (!fileObj.existsSync()) {
+                developer.log('File does not exist at path: $filePathStr', name: 'Document.fromJson');
+                // We'll still keep the fileObj and path, as it might be created later
+              }
+            }
           } catch (e) {
             developer.log('Error creating File object: $e', name: 'Document.fromJson');
             fileObj = null;
@@ -66,11 +78,17 @@ class Document extends Equatable {
       }
     }
     
+    // First check the explicit type from the JSON
     DocumentType docType = _parseDocumentType(json['type']);
     
-    // Use file extension as a fallback for document type detection
-    if (docType == DocumentType.unsupported && filePathStr != null) {
+    // Then try to infer from the file path if available
+    if ((docType == DocumentType.unsupported || docType == null) && filePathStr != null) {
       docType = _inferTypeFromPath(filePathStr);
+    }
+    
+    // Finally, try to infer from the name as a last resort
+    if ((docType == DocumentType.unsupported || docType == null) && json['name'] != null) {
+      docType = _inferTypeFromPath(json['name']);
     }
     
     return Document(

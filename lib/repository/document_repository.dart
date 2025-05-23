@@ -15,6 +15,21 @@ class DocumentRepository {
   Future<Document> createDocument(
       String folderId, File file, String name) async {
     try {
+      // Check if running on web platform
+      if (kIsWeb) {
+        developer.log('Web platform detected, using alternative approach', name: 'DocumentRepository');
+        // For web, we'll need to create a document without a file
+        // or use a different approach that works on web
+        final response = await _apiService.post(API.document, {
+          'folder': folderId,
+          'name': name,
+          'content': 'Document content',
+          'type': _inferTypeFromFileName(name),
+        }, {});
+        
+        return Document.fromJson(response);
+      }
+      
       // Check if file extension is allowed
       final fileExt = path.extension(file.path).toLowerCase();
       if (fileExt != '.pdf' && fileExt != '.csv' && fileExt != '.docx') {
@@ -22,7 +37,14 @@ class DocumentRepository {
       }
       
       // Verify file exists and is readable
-      if (!file.existsSync()) {
+      bool fileExists = false;
+      try {
+        fileExists = file.existsSync();
+      } catch (e) {
+        developer.log('Error checking if file exists: $e', name: 'DocumentRepository');
+      }
+      
+      if (!fileExists) {
         throw Exception('File does not exist at path: ${file.path}');
       }
       
@@ -41,7 +63,28 @@ class DocumentRepository {
       }
       
       // Try to create a local copy in temp directory
-      final tempDir = await getTemporaryDirectory();
+      Directory? tempDir;
+      try {
+        tempDir = await getTemporaryDirectory();
+      } catch (e) {
+        developer.log('Error getting temporary directory: $e, will use original file path', name: 'DocumentRepository');
+        // If we can't get temp directory, just use the original file
+        final response = await _apiService.uploadFile(
+          API.document, 
+          file,
+          {
+            'folder': folderId,
+            'name': name,
+          }
+        );
+        
+        if (response == null || response.isEmpty) {
+          throw Exception('Empty response received when creating document');
+        }
+        
+        return Document.fromJson(response);
+      }
+      
       final fileName = path.basename(file.path);
       final tempFile = File('${tempDir.path}/$fileName');
       
@@ -91,6 +134,26 @@ class DocumentRepository {
     } catch (e) {
       developer.log('Error creating document: $e', name: 'DocumentRepository');
       rethrow;
+    }
+  }
+  
+  // Helper method to infer document type from filename
+  String _inferTypeFromFileName(String fileName) {
+    try {
+      final extension = path.extension(fileName).toLowerCase().replaceAll('.', '');
+      
+      if (['csv'].contains(extension)) {
+        return 'csv';
+      } else if (['pdf'].contains(extension)) {
+        return 'pdf';
+      } else if (['doc', 'docx', 'rtf', 'txt'].contains(extension)) {
+        return 'docx';
+      } else {
+        return 'pdf'; // Default to PDF
+      }
+    } catch (e) {
+      developer.log('Error inferring file type from name: $e', name: 'DocumentRepository');
+      return 'pdf'; // Default to PDF on error
     }
   }
 

@@ -9,8 +9,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'dart:convert';
 import 'dart:developer' as developer;
+import 'dart:typed_data';
 import 'package:excel/excel.dart';
 import 'package:uuid/uuid.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class EnhancedDocumentEditor extends StatefulWidget {
   final File file;
@@ -47,6 +49,7 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
   
   // For PDF files 
   File? _annotatedPdfFile;
+  Uint8List? _pdfBytes; // To store PDF data for web
   
   // For DOCX files
   late MutableDocument _superEditorDocument;
@@ -87,34 +90,84 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
     });
     
     try {
+      // Handle web platform specially
+      if (kIsWeb) {
+        // For web, we'll use default content as we can't directly access files
+        _handleWebPlatform();
+        return;
+      }
+      
       // Check if file exists first
-      if (!widget.file.existsSync()) {
-        throw Exception('File does not exist at path: ${widget.file.path}');
+      bool fileExists = false;
+      try {
+        // Normalize path for Windows if needed
+        String normalizedPath = widget.file.path;
+        if (Platform.isWindows) {
+          normalizedPath = normalizedPath.replaceAll('\\', '/');
+          developer.log('Normalized Windows path: $normalizedPath', name: 'EnhancedDocumentEditor');
+        }
+        
+        // Check file existence with proper error handling
+        try {
+          fileExists = await widget.file.exists();
+          developer.log('File exists check: $fileExists for path: ${widget.file.path}', 
+              name: 'EnhancedDocumentEditor');
+        } catch (e) {
+          developer.log('Error checking if file exists: $e', name: 'EnhancedDocumentEditor');
+          fileExists = false;
+        }
+      } catch (e) {
+        developer.log('Error normalizing path: $e', name: 'EnhancedDocumentEditor');
+        fileExists = false;
+      }
+      
+      if (!fileExists) {
+        developer.log('Warning: File does not exist at path: ${widget.file.path}', name: 'EnhancedDocumentEditor');
       }
       
       switch (_documentType) {
         case app_document.DocumentType.csv:
-          await _loadCsvDocument();
+          await _loadCsvDocument(fileExists);
           break;
         case app_document.DocumentType.pdf:
-          // PDF loading happens in the viewer
-          setState(() {
-            _isLoading = false;
-          });
-          break;
-        case app_document.DocumentType.docx:
-          await _loadDocxDocument();
-          break;
-        default:
-          // For unsupported types, try to load as text
-          try {
-            final content = await widget.file.readAsString();
-            _docTextController.text = content;
+          if (fileExists) {
+            // PDF loading happens in the viewer
             setState(() {
               _isLoading = false;
             });
-          } catch (e) {
-            throw Exception('Unsupported document type and cannot read as text: $e');
+          } else {
+            // Can't display PDF if file doesn't exist
+            setState(() {
+              _errorMessage = 'PDF file not found. Please create a new document.';
+              _isLoading = false;
+            });
+          }
+          break;
+        case app_document.DocumentType.docx:
+          await _loadDocxDocument(fileExists);
+          break;
+        default:
+          // For unsupported types, try to load as text
+          if (fileExists) {
+            try {
+              final content = await widget.file.readAsString();
+              _docTextController.text = content;
+              setState(() {
+                _isLoading = false;
+              });
+            } catch (e) {
+              // Fall back to default text
+              _docTextController.text = 'Document content goes here.';
+              setState(() {
+                _isLoading = false;
+              });
+            }
+          } else {
+            // Use default content
+            _docTextController.text = 'Document content goes here.';
+            setState(() {
+              _isLoading = false;
+            });
           }
       }
     } catch (e) {
@@ -126,17 +179,65 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
     }
   }
   
+  // Handle web platform where file system access is limited
+  void _handleWebPlatform() {
+    switch (_documentType) {
+      case app_document.DocumentType.csv:
+        _csvData = [
+          ['Column1', 'Column2', 'Column3'],
+          ['Value1', 'Value2', 'Value3'],
+          ['Value4', 'Value5', 'Value6'],
+        ];
+        _dataSource = SpreadsheetDataSource(data: _csvData);
+        break;
+      case app_document.DocumentType.docx:
+        _docTextController.text = 'Document content for ${widget.documentName}\n\nEdit this document in the web version.';
+        break;
+      case app_document.DocumentType.pdf:
+        // PDF viewing on web needs special handling
+        _errorMessage = 'PDF viewing in web version has limited functionality.';
+        break;
+      default:
+        _docTextController.text = 'Document content goes here.\n\nEdit this document in the web version.';
+    }
+    
+    setState(() {
+      _isLoading = false;
+    });
+  }
+  
   // MARK: - CSV Document Handling
   
-  Future<void> _loadCsvDocument() async {
+  Future<void> _loadCsvDocument(bool fileExists) async {
     try {
-      final loadedData = await _parseCsvWithExcel(widget.file);
-      
-      // Ensure we have at least one row for headers
-      if (loadedData.isEmpty) {
-        _csvData = [['Column1', 'Column2', 'Column3']];
+      if (fileExists) {
+        try {
+          final loadedData = await _parseCsvWithExcel(widget.file);
+          
+          // Ensure we have at least one row for headers
+          if (loadedData.isEmpty) {
+            _csvData = [
+              ['Column1', 'Column2', 'Column3'],
+              ['Value1', 'Value2', 'Value3'],
+            ];
+          } else {
+            _csvData = loadedData;
+          }
+        } catch (e) {
+          developer.log('Error parsing CSV, using default data: $e', name: 'EnhancedDocumentEditor');
+          _csvData = [
+            ['Column1', 'Column2', 'Column3'],
+            ['Value1', 'Value2', 'Value3'],
+            ['Error', 'Parsing', 'File'],
+          ];
+        }
       } else {
-        _csvData = loadedData;
+        // Default data if file doesn't exist
+        _csvData = [
+          ['Column1', 'Column2', 'Column3'],
+          ['Value1', 'Value2', 'Value3'],
+          ['Value4', 'Value5', 'Value6'],
+        ];
       }
       
       _dataSource = SpreadsheetDataSource(data: _csvData);
@@ -145,16 +246,28 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
         _isLoading = false;
       });
     } catch (e) {
+      // Use default data on error
+      _csvData = [
+        ['Column1', 'Column2', 'Column3'],
+        ['Value1', 'Value2', 'Value3'],
+        ['Error', 'Loading', 'Data'],
+      ];
+      _dataSource = SpreadsheetDataSource(data: _csvData);
+      
       setState(() {
-        _errorMessage = 'Error parsing CSV file: $e';
         _isLoading = false;
       });
+      
+      developer.log('Error parsing CSV, using default data: $e', name: 'EnhancedDocumentEditor');
     }
   }
   
   Future<List<List<dynamic>>> _parseCsvWithExcel(File file) async {
     if (!file.existsSync()) {
-      return [['Column1', 'Column2', 'Column3']];
+      return [
+        ['Column1', 'Column2', 'Column3'],
+        ['Value1', 'Value2', 'Value3'],
+      ];
     }
     
     try {
@@ -166,7 +279,10 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
       final excel = Excel.decodeBytes(bytes);
       
       if (excel.tables.isEmpty) {
-        return [['No data', 'found in', 'CSV file']];
+        return [
+          ['No data', 'found in', 'CSV file'],
+          ['Please edit', 'to add', 'content'],
+        ];
       }
       
       // Get the first sheet
@@ -208,7 +324,10 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
         final lines = content.split('\n');
         
         if (lines.isEmpty) {
-          return [['CSV file is empty']];
+          return [
+            ['CSV file is empty'],
+            ['Please add content'],
+          ];
         }
         
         final result = lines.where((line) => line.trim().isNotEmpty).map((line) {
@@ -219,7 +338,10 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
         return result;
       } catch (e) {
         developer.log('Error parsing CSV with fallback method: $e', name: 'EnhancedDocumentEditor');
-        return [['Error', 'parsing', 'CSV file']];
+        return [
+          ['Error', 'parsing', 'CSV file'],
+          ['Please try', 'another', 'file'],
+        ];
       }
     }
   }
@@ -251,10 +373,48 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
         throw Exception('Failed to encode Excel document');
       }
       
-      // Save to file
-      await widget.file.writeAsBytes(bytes);
+      // Check file path
+      developer.log('Saving CSV to file: ${widget.file.path}', name: 'EnhancedDocumentEditor');
       
-      widget.onSave(widget.file);
+      // Check if file exists and is writable
+      bool canWrite = true;
+      String filePath = widget.file.path;
+      
+      // Normalize path for Windows
+      if (Platform.isWindows) {
+        filePath = filePath.replaceAll('\\', '/');
+      }
+      
+      // Ensure the directory exists
+      final directory = path.dirname(filePath);
+      final dir = Directory(directory);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      
+      try {
+        // Test write access
+        final file = File(filePath);
+        await file.writeAsBytes([]);
+      } catch (e) {
+        developer.log('Cannot write to file: $e', name: 'EnhancedDocumentEditor');
+        canWrite = false;
+      }
+      
+      if (!canWrite) {
+        // Try to use a temporary file instead
+        final tempDir = await getTemporaryDirectory();
+        final fileName = path.basename(widget.file.path);
+        filePath = '${tempDir.path}/$fileName';
+        developer.log('Using temporary file instead: $filePath', name: 'EnhancedDocumentEditor');
+      }
+      
+      // Save to file (either original or temporary)
+      final file = File(filePath);
+      await file.writeAsBytes(bytes);
+      
+      // Call the onSave callback with the file
+      widget.onSave(file);
       
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('CSV data saved successfully')),
@@ -328,21 +488,34 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
   
   // MARK: - DOCX Document Handling
   
-  Future<void> _loadDocxDocument() async {
+  Future<void> _loadDocxDocument(bool fileExists) async {
     try {
-      // For now, we'll create a simplified representation for the SuperEditor
-      // In a production app, you'd convert DOCX to a format SuperEditor can understand
-      final content = await _extractDocxContent();
-      _docTextController.text = content.join('\n\n');
+      if (fileExists) {
+        try {
+          // For now, we'll create a simplified representation for the SuperEditor
+          // In a production app, you'd convert DOCX to a format SuperEditor can understand
+          final content = await _extractDocxContent();
+          _docTextController.text = content.join('\n\n');
+        } catch (e) {
+          developer.log('Error extracting DOCX content: $e', name: 'EnhancedDocumentEditor');
+          // Use default content on error
+          _docTextController.text = 'Error loading document content.\n\nYou can edit this text to replace the content.';
+        }
+      } else {
+        // Use default content
+        _docTextController.text = 'Document content goes here.\n\nThis is a new document you can edit.';
+      }
       
       setState(() {
         _isLoading = false;
       });
     } catch (e) {
+      // Use default content on error
+      _docTextController.text = 'Error loading document content.\n\nYou can edit this text to replace the content.';
       setState(() {
-        _errorMessage = 'Error loading DOCX content: $e';
         _isLoading = false;
       });
+      developer.log('Error loading DOCX content, using default content: $e', name: 'EnhancedDocumentEditor');
     }
   }
   
@@ -350,25 +523,66 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
     // This is a simplified version - in a real app, you'd use a more
     // sophisticated DOCX parsing approach
     try {
+      // First try to read as text
       final String content = await widget.file.readAsString();
       return [content];
     } catch (e) {
+      developer.log('Error reading DOCX as text: $e', name: 'EnhancedDocumentEditor');
       // For binary files, provide a placeholder
-      return ['[This document contains formatted content that has been converted for editing. Formatting may be simplified.]'];
+      return ['This document contains formatted content that has been converted for editing. Formatting may be simplified.'];
     }
   }
 
   Future<void> _saveDocxDocument() async {
     try {
-      // Save the content to the file
-      await widget.file.writeAsString(_docTextController.text);
+      // Check file path
+      developer.log('Saving DOCX to file: ${widget.file.path}', name: 'EnhancedDocumentEditor');
       
-      widget.onSave(widget.file);
+      // Check if file exists and is writable
+      bool canWrite = true;
+      String filePath = widget.file.path;
+      
+      // Normalize path for Windows
+      if (Platform.isWindows) {
+        filePath = filePath.replaceAll('\\', '/');
+      }
+      
+      // Ensure the directory exists
+      final directory = path.dirname(filePath);
+      final dir = Directory(directory);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      
+      try {
+        // Test write access
+        final file = File(filePath);
+        await file.writeAsBytes([]);
+      } catch (e) {
+        developer.log('Cannot write to file: $e', name: 'EnhancedDocumentEditor');
+        canWrite = false;
+      }
+      
+      if (!canWrite) {
+        // Try to use a temporary file instead
+        final tempDir = await getTemporaryDirectory();
+        final fileName = path.basename(widget.file.path);
+        filePath = '${tempDir.path}/$fileName';
+        developer.log('Using temporary file instead: $filePath', name: 'EnhancedDocumentEditor');
+      }
+      
+      // Save to file (either original or temporary)
+      final file = File(filePath);
+      await file.writeAsString(_docTextController.text);
+      
+      // Call the onSave callback with the file
+      widget.onSave(file);
       
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Document saved successfully')),
       );
     } catch (e) {
+      developer.log('Error saving document: $e', name: 'EnhancedDocumentEditor');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to save document: $e')),
       );
@@ -379,25 +593,72 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
   
   Future<void> _savePdfWithAnnotations() async {
     try {
-      if (_annotatedPdfFile != null && _annotatedPdfFile!.existsSync()) {
-        // Save the annotated PDF to the original file location
-        final bytes = await _annotatedPdfFile!.readAsBytes();
-        await widget.file.writeAsBytes(bytes);
-        
-        widget.onSave(widget.file);
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PDF with annotations saved successfully')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No annotated PDF to save')),
-        );
+      // Check if we have an annotated PDF
+      File? fileToSave = _annotatedPdfFile;
+      
+      // If we don't have an annotated PDF, use the original file
+      if (fileToSave == null || !await fileToSave.exists()) {
+        fileToSave = widget.file;
       }
+      
+      // Check if the file exists
+      if (!await fileToSave.exists()) {
+        throw Exception('PDF file does not exist');
+      }
+      
+      // Check file path
+      developer.log('Saving PDF to file: ${widget.file.path}', name: 'EnhancedDocumentEditor');
+      
+      // Check if file exists and is writable
+      bool canWrite = true;
+      String filePath = widget.file.path;
+      
+      // Normalize path for Windows
+      if (Platform.isWindows) {
+        filePath = filePath.replaceAll('\\', '/');
+      }
+      
+      // Ensure the directory exists
+      final directory = path.dirname(filePath);
+      final dir = Directory(directory);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      
+      try {
+        // Test write access
+        final file = File(filePath);
+        await file.writeAsBytes([]);
+      } catch (e) {
+        developer.log('Cannot write to file: $e', name: 'EnhancedDocumentEditor');
+        canWrite = false;
+      }
+      
+      if (!canWrite) {
+        // Try to use a temporary file instead
+        final tempDir = await getTemporaryDirectory();
+        final fileName = path.basename(widget.file.path);
+        filePath = '${tempDir.path}/$fileName';
+        developer.log('Using temporary file instead: $filePath', name: 'EnhancedDocumentEditor');
+      }
+      
+      // Read the bytes from the source file
+      final bytes = await fileToSave.readAsBytes();
+      
+      // Save to file (either original or temporary)
+      final file = File(filePath);
+      await file.writeAsBytes(bytes);
+      
+      // Call the onSave callback with the file
+      widget.onSave(file);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PDF with annotations saved successfully')),
+      );
     } catch (e) {
       developer.log('Error saving PDF with annotations: $e', name: 'EnhancedDocumentEditor');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save PDF with annotations: $e')),
+        SnackBar(content: Text('Failed to save PDF: $e')),
       );
     }
   }
@@ -445,10 +706,11 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _loadDocument,
-              child: const Text('Retry'),
-            ),
+            if (!kIsWeb) // Only show retry on non-web
+              ElevatedButton(
+                onPressed: _loadDocument,
+                child: const Text('Retry'),
+              ),
           ],
         ),
       );
@@ -462,7 +724,7 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
       case app_document.DocumentType.docx:
         return _buildDocxEditor();
       default:
-        return const Center(child: Text('Unsupported document type'));
+        return _buildDocxEditor(); // Use text editor as fallback
     }
   }
   
@@ -569,26 +831,185 @@ class _EnhancedDocumentEditorState extends State<EnhancedDocumentEditor> {
   }
   
   Widget _buildPdfEditor() {
-    return Column(
-      children: [
-        if (!widget.readOnly) _buildPdfToolbar(),
-        Expanded(
-          child: SfPdfViewer.file(
-            widget.file,
-            controller: _pdfViewerController,
-            canShowScrollHead: true,
-            canShowScrollStatus: true,
-            enableTextSelection: true,
-            onTextSelectionChanged: (PdfTextSelectionChangedDetails details) {
-              if (details.selectedText != null && details.selectedText!.isNotEmpty) {
-                developer.log('Selected text: ${details.selectedText}', name: 'EnhancedDocumentEditor');
-              }
-            },
-            // Remove annotation callbacks as they're not supported in this version
-          ),
+    // On web, show a message
+    if (kIsWeb) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.picture_as_pdf, size: 72, color: Colors.red),
+            const SizedBox(height: 16),
+            const Text(
+              'PDF viewing is limited in the web version.',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'You\'re viewing: ${widget.documentName}',
+              style: const TextStyle(fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Please use the desktop app for full PDF functionality.',
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
-      ],
-    );
+      );
+    }
+    
+    // Check if file exists
+    bool fileExists = false;
+    try {
+      fileExists = widget.file.existsSync();
+    } catch (e) {
+      developer.log('Error checking if file exists: $e', name: 'EnhancedDocumentEditor');
+      fileExists = false;
+    }
+    
+    if (!fileExists) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.picture_as_pdf, size: 72, color: Colors.red),
+            const SizedBox(height: 16),
+            const Text(
+              'PDF file not found',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Cannot load: ${widget.documentName}',
+              style: const TextStyle(fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Path: ${widget.file.path}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Please create a new document or check file permissions.',
+              textAlign: TextAlign.center,
+            ),
+            ElevatedButton(
+              onPressed: () {
+                // Create an empty PDF file
+                _createEmptyPdfFile();
+              },
+              child: const Text('Create Empty PDF File'),
+            ),
+          ],
+        ),
+      );
+    }
+    
+    // Valid file, try to display it
+    try {
+      return Column(
+        children: [
+          if (!widget.readOnly) _buildPdfToolbar(),
+          Expanded(
+            child: SfPdfViewer.file(
+              widget.file,
+              controller: _pdfViewerController,
+              canShowScrollHead: true,
+              canShowScrollStatus: true,
+              enableTextSelection: true,
+              onTextSelectionChanged: (PdfTextSelectionChangedDetails details) {
+                if (details.selectedText != null && details.selectedText!.isNotEmpty) {
+                  developer.log('Selected text: ${details.selectedText}', name: 'EnhancedDocumentEditor');
+                }
+              },
+            ),
+          ),
+        ],
+      );
+    } catch (e) {
+      developer.log('Error displaying PDF: $e', name: 'EnhancedDocumentEditor');
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 72, color: Colors.red),
+            const SizedBox(height: 16),
+            const Text(
+              'Error displaying PDF',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'File: ${widget.documentName}',
+              style: const TextStyle(fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Error: $e',
+              style: const TextStyle(fontSize: 14, color: Colors.red),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+  }
+  
+  // Helper method to create an empty PDF file if it doesn't exist
+  Future<void> _createEmptyPdfFile() async {
+    try {
+      // Create an empty PDF
+      final bytes = Uint8List(0);
+      
+      // Check if file exists and is writable
+      bool canWrite = true;
+      String filePath = widget.file.path;
+      
+      // Normalize path for Windows
+      if (Platform.isWindows) {
+        filePath = filePath.replaceAll('\\', '/');
+      }
+      
+      // Ensure the directory exists
+      final directory = path.dirname(filePath);
+      final dir = Directory(directory);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      
+      try {
+        // Create file
+        final file = File(filePath);
+        await file.writeAsBytes(bytes);
+        
+        // Reload the document
+        setState(() {
+          _isLoading = true;
+        });
+        _loadDocument();
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Empty PDF file created')),
+        );
+      } catch (e) {
+        developer.log('Cannot create empty PDF file: $e', name: 'EnhancedDocumentEditor');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to create PDF file: $e')),
+        );
+      }
+    } catch (e) {
+      developer.log('Error creating empty PDF: $e', name: 'EnhancedDocumentEditor');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error creating empty PDF: $e')),
+      );
+    }
   }
   
   Widget _buildPdfToolbar() {

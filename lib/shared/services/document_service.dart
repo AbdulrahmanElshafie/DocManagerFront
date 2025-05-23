@@ -3,6 +3,7 @@ import 'package:doc_manager/models/document.dart';
 import 'package:doc_manager/repository/document_repository.dart';
 import 'package:doc_manager/shared/utils/logger.dart';
 import 'package:path/path.dart' as path;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class DocumentService {
   static final DocumentService _instance = DocumentService._internal();
@@ -69,6 +70,12 @@ class DocumentService {
   /// Parse document file type
   DocumentType parseDocumentType(String filePath) {
     try {
+      // Ensure we have a valid path
+      if (filePath == "path" || filePath.trim().isEmpty) {
+        LoggerUtil.warning("Invalid file path received: $filePath");
+        return DocumentType.unsupported;
+      }
+      
       // Use path.extension to correctly extract the file extension
       final extension = path.extension(filePath).toLowerCase().replaceAll('.', '');
       LoggerUtil.info("Parsed file extension: $extension from path: $filePath");
@@ -87,6 +94,24 @@ class DocumentService {
     } catch (e) {
       LoggerUtil.error('Error parsing document type: $e');
       return DocumentType.unsupported;
+    }
+  }
+  
+  /// Normalize file path for the current platform
+  String normalizeFilePath(String filePath) {
+    if (filePath == "path" || filePath.trim().isEmpty) {
+      return "";
+    }
+    
+    try {
+      // For Windows, normalize backslashes to forward slashes
+      if (!kIsWeb && Platform.isWindows) {
+        return filePath.replaceAll('\\', '/');
+      }
+      return filePath;
+    } catch (e) {
+      LoggerUtil.error('Error normalizing file path: $e');
+      return filePath;
     }
   }
 } 

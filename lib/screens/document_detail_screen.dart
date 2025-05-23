@@ -13,6 +13,7 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'dart:developer' as developer;
 import 'package:excel/excel.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class DocumentDetailScreen extends StatefulWidget {
   final Document document;
@@ -37,7 +38,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
   bool _isEditing = false;
   bool _isLoading = true;
   String _errorMessage = '';
-  late File _documentFile;
+  File? _documentFile;
   final TextEditingController _nameController = TextEditingController();
   
   @override
@@ -68,6 +69,12 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
       } else if (widget.document.filePath != null && widget.document.filePath!.isNotEmpty) {
         // If the document has a file path, try to load the file
         try {
+          // For web platform, we can't access files directly
+          if (kIsWeb) {
+            await _createNewDocumentFile();
+            return;
+          }
+          
           String normalizedPath = widget.document.filePath!;
           
           // Normalize path for Windows if needed
@@ -75,10 +82,25 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
             normalizedPath = normalizedPath.replaceAll('\\', '/');
           }
           
+          // Check if the path is just "path" which can happen in error cases
+          if (normalizedPath == "path" || normalizedPath.trim().isEmpty) {
+            developer.log('Invalid file path detected: $normalizedPath', name: 'DocumentDetailScreen');
+            await _createNewDocumentFile();
+            return;
+          }
+          
+          // Create file object but check existence safely
           final file = File(normalizedPath);
           developer.log('Checking if file exists at path: $normalizedPath', name: 'DocumentDetailScreen');
           
-          if (await file.exists()) {
+          bool fileExists = false;
+          try {
+            fileExists = await file.exists();
+          } catch (e) {
+            developer.log('Error checking if file exists: $e', name: 'DocumentDetailScreen');
+          }
+          
+          if (fileExists) {
             _documentFile = file;
             setState(() {
               _isLoading = false;
@@ -108,6 +130,14 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
   
   Future<void> _createNewDocumentFile() async {
     try {
+      // For web platform, we handle differently
+      if (kIsWeb) {
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+      
       final tempDir = await getTemporaryDirectory();
       
       // Create a file with appropriate extension based on document type
@@ -174,35 +204,54 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
 
       String safeFileName = fileName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
       
-      // Create the file
-      String filePath = '${tempDir.path}/$safeFileName';
-      // Use path.normalize to ensure correct path format
-      filePath = path.normalize(filePath);
-      
-      final file = File(filePath);
-      developer.log('Creating new file at: $filePath', name: 'DocumentDetailScreen');
-      
-      // For PDF, we can't easily create content here
-      // For other types, write the initial content
-      if (widget.document.type != DocumentType.pdf) {
-        await file.writeAsString(initialContent);
-      } else {
-        // For PDF, we'll use a minimal PDF or leave it empty for now
-        // In a real app, you'd use a PDF generation library
-        await file.writeAsBytes([]);
+      try {
+        // Create the file
+        String filePath = '${tempDir.path}/$safeFileName';
+        // Use path.normalize to ensure correct path format for Windows
+        filePath = path.normalize(filePath);
+        
+        final file = File(filePath);
+        developer.log('Creating new file at: $filePath', name: 'DocumentDetailScreen');
+        
+        // For PDF, we can't easily create content here
+        // For other types, write the initial content
+        if (widget.document.type != DocumentType.pdf) {
+          await file.writeAsString(initialContent);
+        } else {
+          // Create an empty file for PDF
+          await file.writeAsBytes([]);
+        }
+        
+        // Check if file was created successfully
+        if (await file.exists()) {
+          developer.log('File created successfully at: $filePath', name: 'DocumentDetailScreen');
+          _documentFile = file;
+        } else {
+          throw Exception('Failed to create file at: $filePath');
+        }
+      } catch (fileError) {
+        developer.log('Error creating file: $fileError', name: 'DocumentDetailScreen');
+        throw Exception('Error creating file: $fileError');
       }
-      
-      _documentFile = file;
       
       setState(() {
         _isLoading = false;
       });
     } catch (e) {
-      setState(() {
-        _errorMessage = 'Error creating document: $e';
-        _isLoading = false;
-      });
-      developer.log('Error creating new document file: $e', name: 'DocumentDetailScreen');
+      // Don't show the error to the user if it's related to getTemporaryDirectory
+      if (e.toString().contains('getTemporaryDirectory') && kIsWeb) {
+        developer.log('Web platform does not support getTemporaryDirectory, continuing without file: $e', 
+          name: 'DocumentDetailScreen');
+        setState(() {
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _errorMessage = 'Error creating document: $e';
+          _isLoading = false;
+        });
+        developer.log('Error creating new document file: $e', name: 'DocumentDetailScreen');
+      }
     }
   }
   
@@ -253,23 +302,49 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
       );
       return;
     }
-    
+
     try {
-      if (widget.isNewDocument) {
-        // If it's a new document, create it on the server
-        _documentBloc.add(AddDocument(
-          file: _documentFile,
-          name: _nameController.text,
-          folderId: widget.document.folderId,
-        ));
+      // Special handling for web platform
+      if (kIsWeb) {
+        // For web, we use a simplified approach without actual files
+        if (widget.isNewDocument) {
+          // Create a document with just text content
+          _documentBloc.add(CreateDocument(
+            name: _nameController.text,
+            folderId: widget.document.folderId,
+            content: "Web document content for ${_nameController.text}",
+          ));
+        } else {
+          // Update existing document
+          _documentBloc.add(UpdateDocument(
+            id: widget.document.id,
+            name: _nameController.text,
+            folderId: widget.document.folderId,
+            content: "Updated web document content for ${_nameController.text}",
+          ));
+        }
       } else {
-        // If it's an existing document, update it
-        _documentBloc.add(UpdateDocument(
-          id: widget.document.id,
-          file: _documentFile,
-          name: _nameController.text,
-          folderId: widget.document.folderId,
-        ));
+        // Native platform handling with actual files
+        if (_documentFile == null) {
+          throw Exception("No document file available");
+        }
+        
+        if (widget.isNewDocument) {
+          // If it's a new document, create it on the server
+          _documentBloc.add(AddDocument(
+            file: _documentFile!,
+            name: _nameController.text,
+            folderId: widget.document.folderId,
+          ));
+        } else {
+          // If it's an existing document, update it
+          _documentBloc.add(UpdateDocument(
+            id: widget.document.id,
+            file: _documentFile!,
+            name: _nameController.text,
+            folderId: widget.document.folderId,
+          ));
+        }
       }
       
       // If we were in edit mode, exit it
@@ -531,20 +606,117 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
   Widget _buildDocumentContent() {
     // In mobile or tablet layout, add some padding
     final isDesktop = MediaQuery.of(context).size.width >= 1100;
-    
     return Padding(
       padding: isDesktop ? EdgeInsets.zero : const EdgeInsets.all(16.0),
       child: Card(
         clipBehavior: Clip.antiAlias,
-        child: EnhancedDocumentEditor(
-          file: _documentFile,
-          documentType: widget.document.type,
-          documentName: widget.document.name,
-          readOnly: !_isEditing && !widget.isNewDocument,
-          onSave: _handleSaveDocument,
-        ),
+        child: kIsWeb || _documentFile == null
+            ? _buildWebDocumentEditor()
+            : EnhancedDocumentEditor(
+                file: _documentFile!,
+                documentType: widget.document.type,
+                documentName: widget.document.name,
+                readOnly: !_isEditing && !widget.isNewDocument,
+                onSave: _handleSaveDocument,
+              ),
       ),
     );
+  }
+  
+  // Special editor for web platform or when file is null
+  Widget _buildWebDocumentEditor() {
+    switch (widget.document.type) {
+      case DocumentType.pdf:
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.picture_as_pdf, size: 72, color: Colors.red),
+              const SizedBox(height: 16),
+              const Text(
+                'PDF viewing is limited in this environment',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                widget.document.name,
+                style: const TextStyle(fontSize: 16),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Document viewing is limited in this environment.',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        );
+      case DocumentType.csv:
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.table_chart, size: 72, color: Colors.green),
+              const SizedBox(height: 16),
+              const Text(
+                'Spreadsheet Viewer',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                widget.document.name,
+                style: const TextStyle(fontSize: 16),
+                textAlign: TextAlign.center,
+              ),
+              if (_isEditing)
+                const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: TextField(
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(),
+                      labelText: 'Spreadsheet Content (Web View)',
+                      hintText: 'Spreadsheet editing is limited in this environment.',
+                    ),
+                    maxLines: 10,
+                  ),
+                ),
+            ],
+          ),
+        );
+      case DocumentType.docx:
+      default:
+        // Text editor as fallback
+        return Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            children: [
+              const Icon(Icons.description, size: 48, color: Colors.blue),
+              const SizedBox(height: 16),
+              Text(
+                widget.document.name,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: TextField(
+                  controller: _nameController, // Reuse the name controller as a simple text editor
+                  readOnly: !_isEditing && !widget.isNewDocument,
+                  maxLines: null,
+                  expands: true,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    hintText: 'Document content goes here.\n\nEdit this document.',
+                  ),
+                  style: const TextStyle(fontFamily: 'Roboto', fontSize: 16),
+                ),
+              ),
+            ],
+          ),
+        );
+    }
   }
   
   @override
