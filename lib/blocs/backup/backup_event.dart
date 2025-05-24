@@ -35,12 +35,7 @@ class LoadBackup extends BackupEvent {
 }
 
 class CreateBackup extends BackupEvent {
-  final String documentId;
-  
-  const CreateBackup({required this.documentId});
-  
-  @override
-  List<Object?> get props => [documentId];
+  const CreateBackup();
 }
 
 class RestoreBackup extends BackupEvent {

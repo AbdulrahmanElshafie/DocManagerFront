@@ -42,12 +42,14 @@ class LoadVersion extends VersionEvent {
 class CreateVersion extends VersionEvent {
   final String documentId;
   final String versionId;
+  final String? comment;
   
   const CreateVersion({
     required this.documentId,
     required this.versionId,
+    this.comment,
   });
   
   @override
-  List<Object?> get props => [documentId, versionId];
+  List<Object?> get props => [documentId, versionId, comment];
 } 

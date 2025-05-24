@@ -7,6 +7,7 @@ import 'package:doc_manager/shared/components/responsive_builder.dart';
 import 'package:doc_manager/shared/services/auth_service.dart';
 import 'package:doc_manager/repository/user_repository.dart';
 import 'package:doc_manager/shared/services/secure_storage_service.dart';
+import 'package:doc_manager/shared/providers/theme_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -195,6 +196,7 @@ class _MainScreenState extends State<MainScreen> {
       appBar: AppBar(
         title: Text(_screenTitles[_selectedIndex]),
         actions: [
+          _buildThemeToggle(),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,
@@ -260,6 +262,7 @@ class _MainScreenState extends State<MainScreen> {
               appBar: AppBar(
                 title: Text(_screenTitles[_selectedIndex]),
                 actions: [
+                  _buildThemeToggle(),
                   IconButton(
                     icon: const Icon(Icons.logout),
                     onPressed: _logout,
@@ -357,6 +360,9 @@ class _MainScreenState extends State<MainScreen> {
             child: Scaffold(
               appBar: AppBar(
                 title: Text(_screenTitles[_selectedIndex]),
+                actions: [
+                  _buildThemeToggle(),
+                ],
               ),
               body: _getSelectedScreen(),
             ),
@@ -388,5 +394,36 @@ class _MainScreenState extends State<MainScreen> {
         const SnackBar(content: Text('Logout failed. Please try again.')),
       );
     }
+  }
+
+  Widget _buildThemeToggle() {
+    return Consumer<ThemeProvider>(
+      builder: (context, themeProvider, child) {
+        IconData icon;
+        String tooltip;
+        
+        switch (themeProvider.themeMode) {
+          case ThemeMode.light:
+            icon = Icons.light_mode;
+            tooltip = 'Light Mode (tap for Dark)';
+            break;
+          case ThemeMode.dark:
+            icon = Icons.dark_mode;
+            tooltip = 'Dark Mode (tap for System)';
+            break;
+          case ThemeMode.system:
+          default:
+            icon = Icons.brightness_auto;
+            tooltip = 'System Mode (tap for Light)';
+            break;
+        }
+        
+        return IconButton(
+          icon: Icon(icon),
+          tooltip: tooltip,
+          onPressed: () => themeProvider.toggleTheme(),
+        );
+      },
+    );
   }
 } 

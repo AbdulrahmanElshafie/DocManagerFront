@@ -657,14 +657,34 @@ class _FoldersScreenState extends State<FoldersScreen> {
             );
           }
         },
-        child: const Padding(
-          padding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.home, size: 16),
-              SizedBox(width: 4),
-              Text('Root'),
+              Icon(
+                Icons.home, 
+                size: 16,
+                color: widget.parentFolderId != null 
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.onSurface,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                'Root',
+                style: TextStyle(
+                  fontWeight: widget.parentFolderId != null 
+                      ? FontWeight.normal 
+                      : FontWeight.bold,
+                  decoration: widget.parentFolderId != null 
+                      ? TextDecoration.underline 
+                      : TextDecoration.none,
+                  color: widget.parentFolderId != null 
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.onSurface,
+                  fontSize: 14,
+                ),
+              ),
             ],
           ),
         ),
@@ -676,9 +696,13 @@ class _FoldersScreenState extends State<FoldersScreen> {
       // Add separator
       if (i > 0 || breadcrumbs.isNotEmpty) {
         breadcrumbs.add(
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4),
-            child: Icon(Icons.chevron_right, size: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Icon(
+              Icons.chevron_right, 
+              size: 16,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         );
       }
@@ -703,6 +727,10 @@ class _FoldersScreenState extends State<FoldersScreen> {
               style: TextStyle(
                 fontWeight: isLast ? FontWeight.bold : FontWeight.normal,
                 decoration: isLast ? TextDecoration.none : TextDecoration.underline,
+                color: isLast 
+                    ? Theme.of(context).colorScheme.onSurface
+                    : Theme.of(context).colorScheme.primary,
+                fontSize: 14,
               ),
             ),
           ),
@@ -712,11 +740,37 @@ class _FoldersScreenState extends State<FoldersScreen> {
     
     return Container(
       width: double.infinity,
-      color: Colors.grey[200],
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          bottom: BorderSide(
+            color: Theme.of(context).dividerColor,
+            width: 1,
+          ),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: Row(children: breadcrumbs),
+        child: Row(
+          children: breadcrumbs.map((breadcrumb) {
+            // Apply consistent styling to breadcrumb items
+            if (breadcrumb is InkWell) {
+              return Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: (breadcrumb as InkWell).onTap,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                    child: (breadcrumb.child as Padding).child,
+                  ),
+                ),
+              );
+            }
+            return breadcrumb;
+          }).toList(),
+        ),
       ),
     );
   }

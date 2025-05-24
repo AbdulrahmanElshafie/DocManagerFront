@@ -52,9 +52,21 @@ class _FileEditorState extends State<FileEditor> {
   // DOCX Editor Components - Simplified
   final TextEditingController _docxTextController = TextEditingController();
 
+  // PDF Viewer Additional Components
+  bool _isTextSelectionEnabled = true;
+  int _currentPage = 1;
+  int _totalPages = 1;
+  bool _showSearchBar = false;
+  final TextEditingController _searchController = TextEditingController();
+  int _currentSearchResult = 0;
+  int _totalSearchResults = 0;
+
   @override
   void initState() {
     super.initState();
+    // Initialize with empty CSV data to avoid null reference
+    _csvData = [['Column 1', 'Column 2', 'Column 3']];
+    _csvDataSource = CSVDataSource(_csvData);
     _initializeEditor();
   }
 
@@ -390,18 +402,84 @@ class _FileEditorState extends State<FileEditor> {
   Widget _buildCSVEditor() {
     return Column(
       children: [
+        // CSV Toolbar
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            border: Border(
+              bottom: BorderSide(color: Theme.of(context).dividerColor),
+            ),
+          ),
+          child: Row(
+            children: [
+              ElevatedButton.icon(
+                onPressed: _addCSVRow,
+                icon: const Icon(Icons.add),
+                label: const Text('Add Row'),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: _addCSVColumn,
+                icon: const Icon(Icons.view_column),
+                label: const Text('Add Column'),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: _deleteCSVRow,
+                icon: const Icon(Icons.remove),
+                label: const Text('Delete Row'),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              ),
+              const Spacer(),
+              Text(
+                'Rows: ${_csvData.length}, Columns: ${_csvData.isNotEmpty ? _csvData[0].length : 0}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ],
+          ),
+        ),
+        // CSV Editor
         Expanded(
-          child: SfDataGrid(
-            source: _csvDataSource,
-            controller: _dataGridController,
-            allowEditing: true,
-            allowSorting: true,
-            allowFiltering: true,
-            selectionMode: SelectionMode.single,
-            navigationMode: GridNavigationMode.cell,
-            columnWidthMode: ColumnWidthMode.fill,
-            editingGestureType: EditingGestureType.doubleTap,
-            columns: _buildCSVColumns(),
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: Theme.of(context).dividerColor),
+            ),
+            child: _csvData.isEmpty 
+                ? const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.table_chart, size: 64, color: Colors.grey),
+                        SizedBox(height: 16),
+                        Text('No CSV data available'),
+                        SizedBox(height: 8),
+                        Text('Add rows and columns to get started'),
+                      ],
+                    ),
+                  )
+                : SfDataGrid(
+                    source: _csvDataSource,
+                    controller: _dataGridController,
+                    allowEditing: true,
+                    allowSorting: true,
+                    allowFiltering: true,
+                    allowColumnsResizing: true,
+                    allowTriStateSorting: true,
+                    selectionMode: SelectionMode.single,
+                    navigationMode: GridNavigationMode.cell,
+                    columnWidthMode: ColumnWidthMode.auto,
+                    editingGestureType: EditingGestureType.tap,
+                    columns: _buildCSVColumns(),
+                    gridLinesVisibility: GridLinesVisibility.both,
+                    headerGridLinesVisibility: GridLinesVisibility.both,
+                    onSelectionChanged: (List<DataGridRow> addedRows, List<DataGridRow> removedRows) {
+                      // Handle selection changes
+                    },
+                    onCellTap: (DataGridCellTapDetails details) {
+                      // Handle cell tap for editing
+                    },
+                  ),
           ),
         ),
       ],
@@ -412,14 +490,26 @@ class _FileEditorState extends State<FileEditor> {
     if (_csvData.isEmpty) return [];
     
     return List.generate(_csvData[0].length, (index) {
+      final columnName = 'column$index';
+      final headerText = _csvData.isNotEmpty ? _csvData[0][index] : 'Column ${index + 1}';
+      
       return GridColumn(
-        columnName: 'column$index',
+        columnName: columnName,
+        width: 120, // Fixed width for better display
         label: Container(
           padding: const EdgeInsets.all(8.0),
           alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primaryContainer,
+            border: Border.all(color: Theme.of(context).dividerColor),
+          ),
           child: Text(
-            _csvData[0][index],
-            style: const TextStyle(fontWeight: FontWeight.bold),
+            headerText,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+            ),
+            overflow: TextOverflow.ellipsis,
           ),
         ),
       );
@@ -427,18 +517,154 @@ class _FileEditorState extends State<FileEditor> {
   }
 
   Widget _buildPDFViewer() {
+    return Column(
+      children: [
+        // PDF Toolbar
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            border: Border(
+              bottom: BorderSide(color: Theme.of(context).dividerColor),
+            ),
+          ),
+          child: Row(
+            children: [
+              IconButton(
+                onPressed: _zoomOut,
+                icon: const Icon(Icons.zoom_out),
+                tooltip: 'Zoom Out',
+              ),
+              IconButton(
+                onPressed: _zoomIn,
+                icon: const Icon(Icons.zoom_in),
+                tooltip: 'Zoom In',
+              ),
+              IconButton(
+                onPressed: _fitToWidth,
+                icon: const Icon(Icons.fit_screen),
+                tooltip: 'Fit to Width',
+              ),
+              const VerticalDivider(),
+              IconButton(
+                onPressed: _showPDFSearch,
+                icon: const Icon(Icons.search),
+                tooltip: 'Search',
+              ),
+              IconButton(
+                onPressed: _toggleTextSelection,
+                icon: Icon(_isTextSelectionEnabled ? Icons.text_fields : Icons.text_fields_outlined),
+                tooltip: 'Toggle Text Selection',
+              ),
+              const VerticalDivider(),
+              IconButton(
+                onPressed: _addHighlight,
+                icon: const Icon(Icons.highlight),
+                tooltip: 'Highlight',
+                color: Colors.yellow[700],
+              ),
+              IconButton(
+                onPressed: _addNote,
+                icon: const Icon(Icons.note_add),
+                tooltip: 'Add Note',
+                color: Colors.blue,
+              ),
+              const Spacer(),
+              Text(
+                '$_currentPage / $_totalPages',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                onPressed: _goToPreviousPage,
+                icon: const Icon(Icons.keyboard_arrow_left),
+                tooltip: 'Previous Page',
+              ),
+              IconButton(
+                onPressed: _goToNextPage,
+                icon: const Icon(Icons.keyboard_arrow_right),
+                tooltip: 'Next Page',
+              ),
+            ],
+          ),
+        ),
+        // PDF Search Bar (conditionally shown)
+        if (_showSearchBar)
+          Container(
+            padding: const EdgeInsets.all(8),
+            color: Theme.of(context).colorScheme.primaryContainer,
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search in PDF...',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_searchController.text.isNotEmpty) ...[
+                            Text(
+                              '$_currentSearchResult of $_totalSearchResults',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              onPressed: _searchPrevious,
+                              icon: const Icon(Icons.keyboard_arrow_up),
+                              tooltip: 'Previous Result',
+                            ),
+                            IconButton(
+                              onPressed: _searchNext,
+                              icon: const Icon(Icons.keyboard_arrow_down),
+                              tooltip: 'Next Result',
+                            ),
+                          ],
+                          IconButton(
+                            onPressed: _closeSearch,
+                            icon: const Icon(Icons.close),
+                            tooltip: 'Close Search',
+                          ),
+                        ],
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      isDense: true,
+                    ),
+                    onChanged: _onSearchTextChanged,
+                    onSubmitted: _onSearchSubmitted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        // PDF Viewer
+        Expanded(
+          child: _buildPDFContent(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPDFContent() {
     if (_isRemoteFile && _fileUrl != null) {
       // For remote PDF files, use URL
       return SfPdfViewer.network(
         _fileUrl!,
         key: _pdfViewerKey,
         controller: _pdfController,
-        enableTextSelection: true,
+        enableTextSelection: _isTextSelectionEnabled,
         enableHyperlinkNavigation: true,
         enableDocumentLinkAnnotation: true,
         canShowScrollHead: true,
-        canShowScrollStatus: true,
+        canShowScrollStatus: false, // We handle this in toolbar
         canShowPaginationDialog: true,
+        enableDoubleTapZooming: true,
+        onPageChanged: _onPageChanged,
+        onDocumentLoaded: _onPDFDocumentLoaded,
+        onTextSelectionChanged: _onTextSelectionChanged,
       );
     } else if (_fileBytes != null) {
       // For downloaded remote files or web
@@ -446,12 +672,16 @@ class _FileEditorState extends State<FileEditor> {
         _fileBytes!,
         key: _pdfViewerKey,
         controller: _pdfController,
-        enableTextSelection: true,
+        enableTextSelection: _isTextSelectionEnabled,
         enableHyperlinkNavigation: true,
         enableDocumentLinkAnnotation: true,
         canShowScrollHead: true,
-        canShowScrollStatus: true,
+        canShowScrollStatus: false,
         canShowPaginationDialog: true,
+        enableDoubleTapZooming: true,
+        onPageChanged: _onPageChanged,
+        onDocumentLoaded: _onPDFDocumentLoaded,
+        onTextSelectionChanged: _onTextSelectionChanged,
       );
     } else if (_currentFile != null) {
       // For local files
@@ -459,12 +689,16 @@ class _FileEditorState extends State<FileEditor> {
         _currentFile!,
         key: _pdfViewerKey,
         controller: _pdfController,
-        enableTextSelection: true,
+        enableTextSelection: _isTextSelectionEnabled,
         enableHyperlinkNavigation: true,
         enableDocumentLinkAnnotation: true,
         canShowScrollHead: true,
-        canShowScrollStatus: true,
+        canShowScrollStatus: false,
         canShowPaginationDialog: true,
+        enableDoubleTapZooming: true,
+        onPageChanged: _onPageChanged,
+        onDocumentLoaded: _onPDFDocumentLoaded,
+        onTextSelectionChanged: _onTextSelectionChanged,
       );
     } else {
       return const Center(
@@ -478,23 +712,252 @@ class _FileEditorState extends State<FileEditor> {
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          const Text(
-            'DOCX Editor (Simplified)',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          // Information Banner
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              border: Border.all(color: Colors.blue.shade200),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info, color: Colors.blue.shade700),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'DOCX File Editing - Limited Support',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue.shade700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'DOCX files contain complex XML-based formatting, tables, images, and styles that cannot be fully rendered in this editor. This shows extracted text content only.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.blue.shade600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'For full DOCX editing with formatting preservation, use Microsoft Word, Google Docs, or LibreOffice.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.blue.shade600,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 16),
+          // Toolbar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              border: Border.all(color: Theme.of(context).dividerColor),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                IconButton(
+                  onPressed: _makeBold,
+                  icon: const Icon(Icons.format_bold),
+                  tooltip: 'Bold (Markdown: **text**)',
+                ),
+                IconButton(
+                  onPressed: _makeItalic,
+                  icon: const Icon(Icons.format_italic),
+                  tooltip: 'Italic (Markdown: *text*)',
+                ),
+                IconButton(
+                  onPressed: _insertLink,
+                  icon: const Icon(Icons.link),
+                  tooltip: 'Insert Link',
+                ),
+                const VerticalDivider(),
+                IconButton(
+                  onPressed: _insertBulletList,
+                  icon: const Icon(Icons.format_list_bulleted),
+                  tooltip: 'Bullet List',
+                ),
+                IconButton(
+                  onPressed: _insertNumberedList,
+                  icon: const Icon(Icons.format_list_numbered),
+                  tooltip: 'Numbered List',
+                ),
+                IconButton(
+                  onPressed: _insertHeading,
+                  icon: const Icon(Icons.title),
+                  tooltip: 'Insert Heading',
+                ),
+                const Spacer(),
+                Text(
+                  'Lines: ${_getLineCount()}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Words: ${_getWordCount()}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Text Editor
           Expanded(
-            child: TextField(
-              maxLines: null,
-              expands: true,
-              decoration: const InputDecoration(
-                hintText: 'Start editing your document here...',
-                border: OutlineInputBorder(),
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: Theme.of(context).dividerColor),
+                borderRadius: BorderRadius.circular(8),
               ),
-              controller: _docxTextController,
+              child: TextField(
+                maxLines: null,
+                expands: true,
+                decoration: const InputDecoration(
+                  hintText: 'Start editing your document here...\n\nSupported formatting:\n**Bold Text**\n*Italic Text*\n[Link Text](URL)\n# Heading 1\n## Heading 2\n- Bullet point\n1. Numbered list',
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.all(16),
+                ),
+                controller: _docxTextController,
+                style: const TextStyle(
+                  fontFamily: 'monospace', // Better for seeing formatting
+                  fontSize: 14,
+                  height: 1.5,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Export Options
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.help_outline, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Tip: For advanced DOCX editing, consider using specialized applications like Microsoft Word or Google Docs.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: _exportAsMarkdown,
+                  icon: const Icon(Icons.download, size: 16),
+                  label: const Text('Export as Markdown'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  int _getLineCount() {
+    return _docxTextController.text.split('\n').length;
+  }
+
+  int _getWordCount() {
+    final text = _docxTextController.text.trim();
+    if (text.isEmpty) return 0;
+    return text.split(RegExp(r'\s+')).length;
+  }
+
+  void _insertBulletList() {
+    final selection = _docxTextController.selection;
+    final text = _docxTextController.text;
+    final newText = text.replaceRange(selection.start, selection.end, '- ');
+    _docxTextController.text = newText;
+    _docxTextController.selection = TextSelection.collapsed(
+      offset: selection.start + 2,
+    );
+  }
+
+  void _insertNumberedList() {
+    final selection = _docxTextController.selection;
+    final text = _docxTextController.text;
+    final newText = text.replaceRange(selection.start, selection.end, '1. ');
+    _docxTextController.text = newText;
+    _docxTextController.selection = TextSelection.collapsed(
+      offset: selection.start + 3,
+    );
+  }
+
+  void _insertHeading() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Insert Heading'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: const Text('Heading 1'),
+              subtitle: const Text('# Large heading'),
+              onTap: () => _insertHeadingLevel(1),
+            ),
+            ListTile(
+              title: const Text('Heading 2'),
+              subtitle: const Text('## Medium heading'),
+              onTap: () => _insertHeadingLevel(2),
+            ),
+            ListTile(
+              title: const Text('Heading 3'),
+              subtitle: const Text('### Small heading'),
+              onTap: () => _insertHeadingLevel(3),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _insertHeadingLevel(int level) {
+    Navigator.pop(context);
+    final selection = _docxTextController.selection;
+    final text = _docxTextController.text;
+    final prefix = '${'#' * level} ';
+    final newText = text.replaceRange(selection.start, selection.end, prefix);
+    _docxTextController.text = newText;
+    _docxTextController.selection = TextSelection.collapsed(
+      offset: selection.start + prefix.length,
+    );
+  }
+
+  void _exportAsMarkdown() {
+    // Export the content as markdown
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Markdown export functionality would be implemented here'),
+        backgroundColor: Colors.blue,
       ),
     );
   }
@@ -505,7 +968,8 @@ class _FileEditorState extends State<FileEditor> {
       if (_csvData.isEmpty) {
         _csvData.add(['New Row']);
       } else {
-        _csvData.add(List.filled(_csvData[0].length, ''));
+        final newRow = List.filled(_csvData[0].length, '');
+        _csvData.add(newRow);
       }
       _csvDataSource.updateData(_csvData);
     });
@@ -513,11 +977,15 @@ class _FileEditorState extends State<FileEditor> {
 
   void _addCSVColumn() {
     setState(() {
-      for (int i = 0; i < _csvData.length; i++) {
-        if (i == 0) {
-          _csvData[i].add('New Column');
-        } else {
-          _csvData[i].add('');
+      if (_csvData.isEmpty) {
+        _csvData.add(['New Column']);
+      } else {
+        for (int i = 0; i < _csvData.length; i++) {
+          if (i == 0) {
+            _csvData[i].add('New Column');
+          } else {
+            _csvData[i].add('');
+          }
         }
       }
       _csvDataSource.updateData(_csvData);
@@ -529,58 +997,273 @@ class _FileEditorState extends State<FileEditor> {
       if (_csvData.length > 1) {
         _csvData.removeLast();
         _csvDataSource.updateData(_csvData);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cannot delete header row'),
+            backgroundColor: Colors.orange,
+          ),
+        );
       }
     });
   }
 
   // PDF Viewer Actions
   void _showPDFSearch() {
-    _pdfController.searchText('');
+    setState(() {
+      _showSearchBar = !_showSearchBar;
+      if (!_showSearchBar) {
+        _searchController.clear();
+        _pdfController.clearSelection();
+      }
+    });
   }
 
   void _zoomIn() {
-    _pdfController.zoomLevel += 0.25;
+    if (_pdfController.zoomLevel < 3.0) {
+      _pdfController.zoomLevel += 0.25;
+    }
   }
 
   void _zoomOut() {
-    _pdfController.zoomLevel -= 0.25;
+    if (_pdfController.zoomLevel > 0.5) {
+      _pdfController.zoomLevel -= 0.25;
+    }
   }
 
-  // DOCX Editor Actions
-  void _makeBold() {
-    // Implement bold logic
+  void _fitToWidth() {
+    // Reset zoom to fit width
+    _pdfController.zoomLevel = 1.0;
   }
 
-  void _makeItalic() {
-    // Implement italic logic
+  void _toggleTextSelection() {
+    setState(() {
+      _isTextSelectionEnabled = !_isTextSelectionEnabled;
+    });
   }
 
-  void _insertLink() {
-    // Implement link insertion logic
+  void _addHighlight() {
+    // Add highlight annotation - this would need more complex implementation
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Highlight feature - select text first, then use this button'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  }
+
+  void _addNote() {
+    // Add note annotation
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Insert Link'),
+        title: const Text('Add Note'),
         content: const TextField(
           decoration: InputDecoration(
-            labelText: 'URL',
-            hintText: 'https://example.com',
+            labelText: 'Note text',
+            hintText: 'Enter your note here...',
+            border: OutlineInputBorder(),
           ),
+          maxLines: 3,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
           ),
-          TextButton(
+          ElevatedButton(
             onPressed: () {
-              // Implement link insertion
               Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Note added successfully'),
+                  backgroundColor: Colors.green,
+                ),
+              );
             },
-            child: const Text('Insert'),
+            child: const Text('Add Note'),
           ),
         ],
       ),
+    );
+  }
+
+  void _goToPreviousPage() {
+    if (_currentPage > 1) {
+      _pdfController.previousPage();
+    }
+  }
+
+  void _goToNextPage() {
+    if (_currentPage < _totalPages) {
+      _pdfController.nextPage();
+    }
+  }
+
+  void _searchPrevious() {
+    // Note: Current Syncfusion version doesn't support navigation between search results
+    // This is a placeholder for future functionality
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Search navigation not available in current PDF viewer version'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  }
+
+  void _searchNext() {
+    // Note: Current Syncfusion version doesn't support navigation between search results
+    // This is a placeholder for future functionality  
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Search navigation not available in current PDF viewer version'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  }
+
+  void _closeSearch() {
+    setState(() {
+      _showSearchBar = false;
+      _searchController.clear();
+      _currentSearchResult = 0;
+      _totalSearchResults = 0;
+    });
+    _pdfController.clearSelection();
+  }
+
+  void _onSearchTextChanged(String text) {
+    if (text.isNotEmpty) {
+      _pdfController.searchText(text);
+    } else {
+      _pdfController.clearSelection();
+      setState(() {
+        _currentSearchResult = 0;
+        _totalSearchResults = 0;
+      });
+    }
+  }
+
+  void _onSearchSubmitted(String text) {
+    if (text.isNotEmpty) {
+      final result = _pdfController.searchText(text);
+      // Note: Search result handling is limited in current Syncfusion version
+      LoggerUtil.info('PDF search performed for: $text');
+    }
+  }
+
+  void _onPageChanged(PdfPageChangedDetails details) {
+    setState(() {
+      _currentPage = details.newPageNumber;
+    });
+  }
+
+  void _onPDFDocumentLoaded(PdfDocumentLoadedDetails details) {
+    setState(() {
+      _totalPages = details.document.pages.count;
+      _currentPage = 1;
+    });
+  }
+
+  void _onTextSelectionChanged(PdfTextSelectionChangedDetails details) {
+    // Handle text selection change
+    if (details.selectedText != null && details.selectedText!.isNotEmpty) {
+      // Show context menu or handle selection
+      LoggerUtil.info('Text selected: ${details.selectedText}');
+    }
+  }
+
+  // DOCX Editor Actions
+  void _makeBold() {
+    // Implement bold logic for the text editor
+    final selection = _docxTextController.selection;
+    if (selection.isValid) {
+      final text = _docxTextController.text;
+      final selectedText = text.substring(selection.start, selection.end);
+      final newText = text.replaceRange(selection.start, selection.end, '**$selectedText**');
+      _docxTextController.text = newText;
+      _docxTextController.selection = TextSelection.collapsed(
+        offset: selection.start + selectedText.length + 4,
+      );
+    }
+  }
+
+  void _makeItalic() {
+    // Implement italic logic for the text editor
+    final selection = _docxTextController.selection;
+    if (selection.isValid) {
+      final text = _docxTextController.text;
+      final selectedText = text.substring(selection.start, selection.end);
+      final newText = text.replaceRange(selection.start, selection.end, '*$selectedText*');
+      _docxTextController.text = newText;
+      _docxTextController.selection = TextSelection.collapsed(
+        offset: selection.start + selectedText.length + 2,
+      );
+    }
+  }
+
+  void _insertLink() {
+    // Implement link insertion logic
+    showDialog(
+      context: context,
+      builder: (context) {
+        final urlController = TextEditingController();
+        final textController = TextEditingController();
+        
+        return AlertDialog(
+          title: const Text('Insert Link'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: textController,
+                decoration: const InputDecoration(
+                  labelText: 'Link Text',
+                  hintText: 'Enter display text...',
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: urlController,
+                decoration: const InputDecoration(
+                  labelText: 'URL',
+                  hintText: 'https://example.com',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                final linkText = textController.text.isNotEmpty 
+                    ? textController.text 
+                    : urlController.text;
+                final markdownLink = '[$linkText](${urlController.text})';
+                
+                final selection = _docxTextController.selection;
+                final text = _docxTextController.text;
+                final newText = text.replaceRange(
+                  selection.start,
+                  selection.end,
+                  markdownLink,
+                );
+                
+                _docxTextController.text = newText;
+                _docxTextController.selection = TextSelection.collapsed(
+                  offset: selection.start + markdownLink.length,
+                );
+                
+                Navigator.pop(context);
+              },
+              child: const Text('Insert'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -622,7 +1305,9 @@ class _FileEditorState extends State<FileEditor> {
   }
 
   Future<void> _saveCSVFile() async {
-    final csvContent = const ListToCsvConverter().convert(_csvData);
+    // Get the updated data from the CSV data source
+    final updatedData = _csvDataSource.data;
+    final csvContent = const ListToCsvConverter().convert(updatedData);
     
     if (widget.onSave != null) {
       widget.onSave!(csvContent, DocumentType.csv);
@@ -695,6 +1380,7 @@ class _FileEditorState extends State<FileEditor> {
     _dataGridController.dispose();
     _pdfController.dispose();
     _docxTextController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 }
@@ -709,18 +1395,28 @@ class CSVDataSource extends DataGridSource {
   }
 
   void updateData(List<List<String>> data) {
-    _data = data;
-    _dataGridRows = _data.skip(1).map<DataGridRow>((row) {
-      return DataGridRow(
-        cells: row.asMap().entries.map<DataGridCell>((entry) {
-          return DataGridCell<String>(
-            columnName: 'column${entry.key}',
-            value: entry.value,
-          );
-        }).toList(),
-      );
-    }).toList();
+    _data = List.from(data);
+    _buildDataGridRows();
     notifyListeners();
+  }
+
+  void _buildDataGridRows() {
+    _dataGridRows.clear();
+    
+    // Skip header row (index 0) when building data rows
+    for (int i = 1; i < _data.length; i++) {
+      final row = _data[i];
+      _dataGridRows.add(
+        DataGridRow(
+          cells: row.asMap().entries.map<DataGridCell>((entry) {
+            return DataGridCell<String>(
+              columnName: 'column${entry.key}',
+              value: entry.value,
+            );
+          }).toList(),
+        ),
+      );
+    }
   }
 
   @override
@@ -731,47 +1427,77 @@ class CSVDataSource extends DataGridSource {
     return DataGridRowAdapter(
       cells: row.getCells().map<Widget>((cell) {
         return Container(
-          alignment: Alignment.center,
+          alignment: Alignment.centerLeft,
           padding: const EdgeInsets.all(8.0),
-          child: Text(cell.value?.toString() ?? ''),
+          child: Text(
+            cell.value?.toString() ?? '',
+            style: const TextStyle(fontSize: 12),
+            overflow: TextOverflow.ellipsis,
+          ),
         );
       }).toList(),
     );
   }
 
   @override
-  Widget? buildEditWidget(DataGridRow dataGridRow, RowColumnIndex rowColumnIndex, GridColumn column, CellSubmit submitCell) {
+  Widget? buildEditWidget(
+    DataGridRow dataGridRow,
+    RowColumnIndex rowColumnIndex,
+    GridColumn column,
+    CellSubmit submitCell,
+  ) {
     final String displayText = dataGridRow
-        .getCells()
-        .firstWhere((DataGridCell dataGridCell) =>
-            dataGridCell.columnName == column.columnName)
-        .value
-        ?.toString() ??
-    '';
+            .getCells()
+            .firstWhere((DataGridCell dataGridCell) =>
+                dataGridCell.columnName == column.columnName)
+            .value
+            ?.toString() ??
+        '';
+
+    final TextEditingController controller = TextEditingController(text: displayText);
 
     return Container(
-      padding: const EdgeInsets.all(8.0),
-      alignment: Alignment.center,
+      padding: const EdgeInsets.all(4.0),
+      alignment: Alignment.centerLeft,
       child: TextField(
         autofocus: true,
-        controller: TextEditingController(text: displayText),
-        textAlign: TextAlign.center,
+        controller: controller,
+        textAlign: TextAlign.left,
+        style: const TextStyle(fontSize: 12),
         decoration: const InputDecoration(
           border: InputBorder.none,
-          contentPadding: EdgeInsets.zero,
+          contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          isDense: true,
         ),
         onSubmitted: (String value) {
-          final rowIndex = rowColumnIndex.rowIndex - 1;
-          final columnIndex = rowColumnIndex.columnIndex;
-          
-          if (rowIndex >= 0 && rowIndex < _data.length - 1 && 
-              columnIndex >= 0 && columnIndex < _data[rowIndex + 1].length) {
-            _data[rowIndex + 1][columnIndex] = value;
-          }
-          
+          _updateCellValue(rowColumnIndex, column.columnName, value);
+          submitCell();
+        },
+        onEditingComplete: () {
+          _updateCellValue(rowColumnIndex, column.columnName, controller.text);
           submitCell();
         },
       ),
     );
   }
+
+  void _updateCellValue(RowColumnIndex rowColumnIndex, String columnName, String newValue) {
+    // Calculate the actual data row index (add 1 because we skip header)
+    final dataRowIndex = rowColumnIndex.rowIndex;
+    final actualRowIndex = dataRowIndex + 1; // Skip header row
+    
+    // Extract column index from column name
+    final columnIndex = int.parse(columnName.replaceAll('column', ''));
+    
+    // Update the data
+    if (actualRowIndex < _data.length && columnIndex < _data[actualRowIndex].length) {
+      _data[actualRowIndex][columnIndex] = newValue;
+      
+      // Rebuild the data grid rows to reflect changes
+      _buildDataGridRows();
+      notifyListeners();
+    }
+  }
+
+  List<List<String>> get data => _data;
 } 

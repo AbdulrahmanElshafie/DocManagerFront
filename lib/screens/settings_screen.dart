@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:provider/provider.dart';
 import 'package:doc_manager/blocs/user/user_bloc.dart';
 import 'package:doc_manager/blocs/user/user_event.dart';
 import 'package:doc_manager/blocs/user/user_state.dart';
 import 'package:doc_manager/shared/components/responsive_builder.dart';
+import 'package:doc_manager/shared/providers/theme_provider.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -21,7 +23,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   bool _isEditing = false;
-  bool _darkMode = false;
   bool _notificationsEnabled = true;
   
   @override
@@ -323,17 +324,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 16),
             SwitchListTile(
-              title: const Text('Dark Mode'),
-              subtitle: const Text('Enable dark theme'),
-              value: _darkMode,
-              onChanged: (value) {
-                setState(() {
-                  _darkMode = value;
-                });
-                // Add theme change logic
-              },
-            ),
-            SwitchListTile(
               title: const Text('Notifications'),
               subtitle: const Text('Get alerts about changes to your documents'),
               value: _notificationsEnabled,
@@ -342,6 +332,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _notificationsEnabled = value;
                 });
                 // Add notification settings logic
+              },
+            ),
+            const SizedBox(height: 16),
+            Consumer<ThemeProvider>(
+              builder: (context, themeProvider, child) {
+                return Column(
+                  children: [
+                    ListTile(
+                      title: const Text('Theme Mode'),
+                      subtitle: const Text('Choose your preferred theme'),
+                      trailing: DropdownButton<ThemeMode>(
+                        value: themeProvider.themeMode,
+                        onChanged: (ThemeMode? newMode) {
+                          if (newMode != null) {
+                            themeProvider.setThemeMode(newMode);
+                          }
+                        },
+                        items: const [
+                          DropdownMenuItem(
+                            value: ThemeMode.system,
+                            child: Text('System'),
+                          ),
+                          DropdownMenuItem(
+                            value: ThemeMode.light,
+                            child: Text('Light'),
+                          ),
+                          DropdownMenuItem(
+                            value: ThemeMode.dark,
+                            child: Text('Dark'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    SwitchListTile(
+                      title: const Text('Dark Mode'),
+                      subtitle: const Text('Enable dark theme'),
+                      value: themeProvider.isDarkMode,
+                      onChanged: (value) {
+                        if (value) {
+                          themeProvider.setThemeMode(ThemeMode.dark);
+                        } else {
+                          themeProvider.setThemeMode(ThemeMode.light);
+                        }
+                      },
+                    ),
+                  ],
+                );
               },
             ),
           ],

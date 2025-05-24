@@ -6,11 +6,10 @@ import 'dart:developer' as developer;
 class BackupRepository {
   final ApiService _apiService = ApiService();
 
-  Future<Backup> createBackup(String documentId) async {
+  Future<Backup> createBackup() async {
     try {
-      final response = await _apiService.post(API.backups, {
-        'document': documentId,  // Send document ID in request body
-      }, {});
+      // According to API docs, backup creation doesn't require document ID
+      final response = await _apiService.post(API.backups, {}, {});
       
       developer.log('Create backup response: $response', name: 'BackupRepository');
       return Backup.fromJson(response);

@@ -66,7 +66,7 @@ class BackupBloc extends Bloc<BackupEvent, BackupState> {
   Future<void> _onCreateBackup(CreateBackup event, Emitter<BackupState> emit) async {
     try {
       emit(const BackupsLoading());
-      final backup = await _backupRepository.createBackup(event.documentId);
+      final backup = await _backupRepository.createBackup();
       emit(BackupCreated(backup));
       emit(const BackupSuccess('Backup created successfully'));
     } catch (error) {

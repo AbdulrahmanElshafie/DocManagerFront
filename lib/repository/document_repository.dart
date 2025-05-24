@@ -258,15 +258,12 @@ class DocumentRepository {
     try {
       Map<String, dynamic> params = {};
       
-      // Ensure we're explicitly filtering by folder ID
-      // If folderId is null, we're getting root documents
-      // If folderId has a value, we're getting documents in that specific folder
-      if (folderId != null) {
+      // Only add folder parameter if we're filtering by a specific folder
+      // When folderId is null, we want ALL documents regardless of folder
+      if (folderId != null && folderId.isNotEmpty) {
         params['folder'] = folderId;
-      } else {
-        // For null folderId, explicitly set folder=null to get only root documents
-        params['folder'] = 'null';
       }
+      // Don't add folder parameter when we want all documents
       
       if (query != null && query.isNotEmpty) {
         params['query'] = query;
@@ -278,12 +275,13 @@ class DocumentRepository {
       
       final documents = response.map((e) => Document.fromJson(e)).toList();
       
-      // Double-check that documents are properly filtered by folder
-      if (folderId != null) {
+      // Return all documents when folderId is null (All Folders selected)
+      // Otherwise filter by the specific folder
+      if (folderId != null && folderId.isNotEmpty) {
         return documents.where((doc) => doc.folderId == folderId).toList();
       } else {
-        // For root documents, ensure they don't have a parent folder
-        return documents.where((doc) => doc.folderId.isEmpty).toList();
+        // Return ALL documents when "All Folders" is selected
+        return documents;
       }
     } catch (e) {
       developer.log('Error getting documents: $e', name: 'DocumentRepository');
