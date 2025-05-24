@@ -6,9 +6,9 @@ import 'package:doc_manager/blocs/document/document_event.dart';
 import 'package:doc_manager/blocs/document/document_state.dart';
 import 'package:doc_manager/models/document.dart';
 import 'package:doc_manager/models/folder.dart';
-import 'package:doc_manager/screens/document_detail_screen.dart';
 import 'package:doc_manager/shared/components/responsive_builder.dart';
 import 'package:doc_manager/repository/folder_repository.dart';
+import 'package:doc_manager/widgets/file_editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -599,9 +599,8 @@ class _FoldersScreenState extends State<FoldersScreen> {
                 Navigator.push(
                   context, 
                   MaterialPageRoute(
-                    builder: (context) => DocumentDetailScreen(
+                    builder: (context) => FileEditor(
                       document: state.document,
-                      isEditing: true,
                     ),
                   ),
                 ).then((_) => _loadContent()); // Reload on navigation back
@@ -1023,7 +1022,9 @@ class _FoldersScreenState extends State<FoldersScreen> {
           Navigator.push(
             context, 
             MaterialPageRoute(
-              builder: (context) => DocumentDetailScreen(document: document),
+              builder: (context) => FileEditor(
+                document: document,
+              ),
             ),
           ).then((_) => _loadContent()); // Reload on navigation back
         },
@@ -1075,7 +1076,9 @@ class _FoldersScreenState extends State<FoldersScreen> {
                             Navigator.push(
                               context, 
                               MaterialPageRoute(
-                                builder: (context) => DocumentDetailScreen(document: document, isEditing: true),
+                                builder: (context) => FileEditor(
+                                  document: document,
+                                ),
                               ),
                             ).then((_) => _loadContent()); // Reload on navigation back
                           },
@@ -1143,7 +1146,9 @@ class _FoldersScreenState extends State<FoldersScreen> {
               Navigator.push(
                 context, 
                 MaterialPageRoute(
-                  builder: (context) => DocumentDetailScreen(document: document, isEditing: true),
+                  builder: (context) => FileEditor(
+                    document: document,
+                  ),
                 ),
               ).then((_) => _loadContent()); // Reload on navigation back
             },
@@ -1160,7 +1165,9 @@ class _FoldersScreenState extends State<FoldersScreen> {
         Navigator.push(
           context, 
           MaterialPageRoute(
-            builder: (context) => DocumentDetailScreen(document: document),
+            builder: (context) => FileEditor(
+              document: document,
+            ),
           ),
         ).then((_) => _loadContent()); // Reload on navigation back
       },
