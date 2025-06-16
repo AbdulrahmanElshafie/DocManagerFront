@@ -568,8 +568,8 @@ class _MetadataSectionState extends State<MetadataSection> {
                 }
                 
                 return ListView.builder(
-                  itemCount: activities.length,
-                  itemBuilder: (context, index) => _buildActivityItem(activities[index]),
+                  itemCount: activities!.length,
+                  itemBuilder: (context, index) => _buildActivityItem(activities![index]),
                 );
               } else if (state is ActivityLogError) {
                 return Container(
