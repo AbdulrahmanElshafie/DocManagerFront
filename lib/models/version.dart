@@ -1,101 +1,155 @@
 import 'dart:io';
 import 'package:doc_manager/models/document.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class Version extends Document {
   final String versionId;
   final String modifiedBy;
   final String? comment;
+  final int versionNumber;
+  final DateTime? lastModified;
+  final int size;
 
-  const Version({
+  Version({
     required this.modifiedBy,
     required this.versionId,
     this.comment,
+    required this.versionNumber,
     required super.id,
     required super.name,
-    required super.file,
+    super.file,
+    super.filePath,
     required super.type,
     required super.folderId,
     required super.ownerId,
     required super.createdAt,
-    required super.lastModified,
-    required super.size
+    super.updatedAt,
+    this.lastModified,
+    this.size = 0,
   });
 
-  factory Version.fromJson(Map<String, dynamic> json) => Version(
-    id: json['id'],
-    name: json['name'],
-    file: json['file'],
-    type: json['type'],
-    folderId: json['folderId'],
-    ownerId: json['ownerId'],
-    createdAt: DateTime.parse(json['createdAt']),
-    lastModified: DateTime.parse(json['lastModified']),
-    size: json['size'],
-    versionId: json['versionId'],
-    modifiedBy: json['modifiedBy'],
-    comment: json['comment'],
-  );
+  factory Version.fromJson(Map<String, dynamic> json) {
+    File? fileObj;
+    String? filePathStr;
+    
+    if (json['file'] != null) {
+      final filePath = json['file'];
+      filePathStr = filePath is String ? filePath : null;
+      
+      // Only create a File object if we're not on web and path is valid
+      if (!kIsWeb && filePathStr != null && filePathStr.isNotEmpty) {
+        try {
+          fileObj = File(filePathStr);
+        } catch (e) {
+          print('Error creating File object: $e');
+        }
+      }
+    }
+    
+    // Extract the lastModified date and size
+    DateTime? lastModified;
+    if (json['lastModified'] != null) {
+      lastModified = DateTime.parse(json['lastModified']);
+    } else if (json['updated_at'] != null) {
+      lastModified = DateTime.parse(json['updated_at']);
+    }
+    
+    int size = json['size'] ?? 0;
+    
+    return Version(
+      id: json['id'],
+      name: json['name'],
+      file: fileObj,
+      filePath: filePathStr,
+      type: _parseDocumentType(json['type']),
+      folderId: json['folderId'] ?? json['folder'],
+      ownerId: json['ownerId'] ?? json['owner'] ?? '',
+      createdAt: json['createdAt'] != null ? DateTime.parse(json['createdAt']) : 
+                 json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
+      updatedAt: json['updatedAt'] != null ? DateTime.parse(json['updatedAt']) : 
+                json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null,
+      lastModified: lastModified,
+      size: size,
+      versionId: json['versionId'] ?? json['version_id'] ?? '',
+      modifiedBy: json['modifiedBy'] ?? json['modified_by'] ?? '',
+      comment: json['comment'],
+      versionNumber: json['versionNumber'] ?? json['version_number'] ?? 1,
+    );
+  }
+
+  static DocumentType _parseDocumentType(dynamic typeStr) {
+    if (typeStr == null) return DocumentType.pdf; // Default to PDF
+    
+    if (typeStr is String) {
+      switch(typeStr.toLowerCase()) {
+        case 'csv':
+          return DocumentType.csv;
+        case 'docx':
+          return DocumentType.docx;
+        case 'pdf':
+        default:
+          return DocumentType.pdf;
+      }
+    }
+    return DocumentType.pdf; // Default fallback
+  }
 
   @override
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'file': file,
-    'type': type,
-    'folderId': folderId,
-    'ownerId': ownerId,
-    'createdAt': createdAt.toIso8601String(),
-    'lastModified': lastModified?.toIso8601String(),
-    'size': size,
+    ...super.toJson(),
     'versionId': versionId,
     'modifiedBy': modifiedBy,
     'comment': comment,
+    'versionNumber': versionNumber,
+    'lastModified': lastModified?.toIso8601String(),
+    'size': size,
   };
 
   @override
   Version copyWith({
     String? id,
-    File? file,
-    DateTime? createdAt,
-    String? comment,
-    int? size,
-    String? modifiedBy,
-    String? versionId,
     String? name,
+    File? file,
+    String? filePath,
     DocumentType? type,
     String? folderId,
     String? ownerId,
-    DateTime? lastModified
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    DateTime? lastModified,
+    int? size,
+    String? comment,
+    String? modifiedBy,
+    String? versionId,
+    int? versionNumber,
   }) {
     return Version(
       id: id ?? this.id,
-      file: file ?? this.file,
-      createdAt: createdAt ?? this.createdAt,
-      comment: comment ?? this.comment,
-      size: size ?? this.size,
-      modifiedBy: modifiedBy ?? this.modifiedBy,
-      versionId: versionId ?? this.versionId,
       name: name ?? this.name,
+      file: file ?? this.file,
+      filePath: filePath ?? this.filePath,
       type: type ?? this.type,
       folderId: folderId ?? this.folderId,
       ownerId: ownerId ?? this.ownerId,
-      lastModified: lastModified ?? this.lastModified
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      lastModified: lastModified ?? this.lastModified,
+      size: size ?? this.size,
+      comment: comment ?? this.comment,
+      modifiedBy: modifiedBy ?? this.modifiedBy,
+      versionId: versionId ?? this.versionId,
+      versionNumber: versionNumber ?? this.versionNumber,
     );
   }
 
   @override
   List<Object?> get props => [
-        id,
-        file,
-        createdAt,
-        comment,
-        size,
-        modifiedBy,
+        ...super.props,
         versionId,
-        name,
-        type,
-        folderId,
-        ownerId,
-        lastModified
+        modifiedBy,
+        comment,
+        versionNumber,
+        lastModified,
+        size,
       ];
 }

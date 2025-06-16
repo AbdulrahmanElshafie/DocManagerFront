@@ -1,11 +1,13 @@
 import 'package:equatable/equatable.dart';
 
 class User extends Equatable {
-  final String id;
+  final int id;
   final String username;
   final String email;
   final String firstName;
   final String lastName;
+  final DateTime? dateJoined;
+  final bool isActive;
 
   const User({
     required this.id,
@@ -13,6 +15,8 @@ class User extends Equatable {
     required this.email,
     required this.firstName,
     required this.lastName,
+    this.dateJoined,
+    this.isActive = true,
   });
 
   factory User.fromJson(Map<String, dynamic> json) => User(
@@ -21,6 +25,8 @@ class User extends Equatable {
       email: json['email'],
       firstName: json['first_name'],
       lastName: json['last_name'],
+      dateJoined: json['date_joined'] != null ? DateTime.parse(json['date_joined']) : null,
+      isActive: json['is_active'] ?? true,
   );
 
   Map<String, dynamic> toJson() => {
@@ -29,10 +35,12 @@ class User extends Equatable {
     'email': email,
     'first_name': firstName,
     'last_name': lastName,
+    'date_joined': dateJoined?.toIso8601String(),
+    'is_active': isActive,
   };
 
   User copyWith({
-    String? id,
+    int? id,
     String? username,
     String? email,
     String? firstName,
@@ -46,6 +54,8 @@ class User extends Equatable {
       email: email ?? this.email,
       firstName: firstName ?? this.firstName,
       lastName: lastName ?? this.lastName,
+      dateJoined: dateJoined ?? this.dateJoined,
+      isActive: isActive ?? this.isActive,
     );
   }
 
@@ -56,6 +66,8 @@ class User extends Equatable {
         email,
         firstName,
         lastName,
+        dateJoined,
+        isActive,
       ];
 }
 

@@ -1,0 +1,1900 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "title": "Documentation Chatbot API",
+        "description": "API documentation for the Documentation Chatbot project",
+        "contact": {
+            "email": "sabdo6177@gmail.com"
+        },
+        "license": {
+            "name": "MIT License"
+        },
+        "version": "v1"
+    },
+    "host": "127.0.0.1:8000",
+    "schemes": [
+        "http"
+    ],
+    "basePath": "/api",
+    "consumes": [
+        "application/json"
+    ],
+    "produces": [
+        "application/json"
+    ],
+    "securityDefinitions": {
+        "Basic": {
+            "type": "basic"
+        }
+    },
+    "security": [
+        {
+            "Basic": []
+        }
+    ],
+    "paths": {
+        "/auth/login/": {
+            "post": {
+                "operationId": "auth_login_create",
+                "description": "Authenticate user and obtain JWT access and refresh tokens.",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/TokenObtainPair"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Authentication successful.",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "refresh": {
+                                    "description": "Refresh token",
+                                    "type": "string"
+                                },
+                                "access": {
+                                    "description": "Access token",
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "examples": {
+                            "application/json": {
+                                "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+                                "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication failed due to invalid credentials.",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "detail": {
+                                    "description": "Error message",
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "examples": {
+                            "application/json": {
+                                "detail": "No active account found with the given credentials"
+                            }
+                        }
+                    }
+                },
+                "tags": [
+                    "auth"
+                ]
+            },
+            "parameters": []
+        },
+        "/auth/logout/": {
+            "post": {
+                "operationId": "auth_logout_create",
+                "description": "logout",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "required": [
+                                "refresh"
+                            ],
+                            "type": "object",
+                            "properties": {
+                                "refresh": {
+                                    "description": "refresh token",
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "required": [
+                                "refresh"
+                            ],
+                            "type": "object",
+                            "properties": {
+                                "refresh": {
+                                    "description": "refresh token",
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                },
+                "tags": [
+                    "auth"
+                ]
+            },
+            "parameters": []
+        },
+        "/auth/password-reset/": {
+            "post": {
+                "operationId": "auth_password-reset_create",
+                "description": "Reset the user's password by providing email and new password.",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/PasswordResetConfirm"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Password has been reset successfully.",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "description": "Success message",
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                },
+                                "email": {
+                                    "type": "string"
+                                },
+                                "new_password": {
+                                    "type": "string"
+                                },
+                                "new_password2": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                },
+                "tags": [
+                    "auth"
+                ]
+            },
+            "parameters": []
+        },
+        "/auth/register/": {
+            "post": {
+                "operationId": "auth_register_create",
+                "description": "Create new account",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/Register"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Register"
+                        }
+                    }
+                },
+                "tags": [
+                    "auth"
+                ]
+            },
+            "parameters": []
+        },
+        "/auth/token/refresh/": {
+            "post": {
+                "operationId": "auth_token_refresh_create",
+                "description": "Takes a refresh type JSON web token and returns an access type JSON web\ntoken if the refresh token is valid.",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/TokenRefresh"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/TokenRefresh"
+                        }
+                    }
+                },
+                "tags": [
+                    "auth"
+                ]
+            },
+            "parameters": []
+        },
+        "/auth/user/": {
+            "get": {
+                "operationId": "auth_user_list",
+                "description": "Retrieve the authenticated user's details.",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "User details retrieved successfully.",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "description": "User ID",
+                                    "type": "integer"
+                                },
+                                "username": {
+                                    "description": "Username",
+                                    "type": "string"
+                                },
+                                "email": {
+                                    "description": "User email",
+                                    "type": "string"
+                                },
+                                "first_name": {
+                                    "description": "First name",
+                                    "type": "string"
+                                },
+                                "last_name": {
+                                    "description": "Last name",
+                                    "type": "string"
+                                },
+                                "date_joined": {
+                                    "description": "Date user joined",
+                                    "type": "string"
+                                },
+                                "is_active": {
+                                    "description": "User active status",
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication credentials were not provided."
+                    }
+                },
+                "tags": [
+                    "auth"
+                ]
+            },
+            "put": {
+                "operationId": "auth_user_update",
+                "description": "Update the authenticated user's details.",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/User"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "User details retrieved successfully.",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "description": "User ID",
+                                    "type": "integer"
+                                },
+                                "username": {
+                                    "description": "Username",
+                                    "type": "string"
+                                },
+                                "email": {
+                                    "description": "User email",
+                                    "type": "string"
+                                },
+                                "first_name": {
+                                    "description": "First name",
+                                    "type": "string"
+                                },
+                                "last_name": {
+                                    "description": "Last name",
+                                    "type": "string"
+                                },
+                                "date_joined": {
+                                    "description": "Date user joined",
+                                    "type": "string"
+                                },
+                                "is_active": {
+                                    "description": "User active status",
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "email": {
+                                    "description": "Email validation error",
+                                    "type": "string"
+                                },
+                                "first_name": {
+                                    "description": "First name validation error",
+                                    "type": "string"
+                                },
+                                "last_name": {
+                                    "description": "Last name validation error",
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication credentials were not provided."
+                    }
+                },
+                "tags": [
+                    "auth"
+                ]
+            },
+            "patch": {
+                "operationId": "auth_user_partial_update",
+                "description": "Partially update the authenticated user's details.",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/User"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "User details retrieved successfully.",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "description": "User ID",
+                                    "type": "integer"
+                                },
+                                "username": {
+                                    "description": "Username",
+                                    "type": "string"
+                                },
+                                "email": {
+                                    "description": "User email",
+                                    "type": "string"
+                                },
+                                "first_name": {
+                                    "description": "First name",
+                                    "type": "string"
+                                },
+                                "last_name": {
+                                    "description": "Last name",
+                                    "type": "string"
+                                },
+                                "date_joined": {
+                                    "description": "Date user joined",
+                                    "type": "string"
+                                },
+                                "is_active": {
+                                    "description": "User active status",
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "email": {
+                                    "description": "Email validation error",
+                                    "type": "string"
+                                },
+                                "first_name": {
+                                    "description": "First name validation error",
+                                    "type": "string"
+                                },
+                                "last_name": {
+                                    "description": "Last name validation error",
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication credentials were not provided."
+                    }
+                },
+                "tags": [
+                    "auth"
+                ]
+            },
+            "parameters": []
+        },
+        "/auth/user/update/": {
+            "get": {
+                "operationId": "auth_user_update_list",
+                "description": "Retrieve the authenticated user's details.",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "User details retrieved successfully.",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "description": "User ID",
+                                    "type": "integer"
+                                },
+                                "username": {
+                                    "description": "Username",
+                                    "type": "string"
+                                },
+                                "email": {
+                                    "description": "User email",
+                                    "type": "string"
+                                },
+                                "first_name": {
+                                    "description": "First name",
+                                    "type": "string"
+                                },
+                                "last_name": {
+                                    "description": "Last name",
+                                    "type": "string"
+                                },
+                                "date_joined": {
+                                    "description": "Date user joined",
+                                    "type": "string"
+                                },
+                                "is_active": {
+                                    "description": "User active status",
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication credentials were not provided."
+                    }
+                },
+                "tags": [
+                    "auth"
+                ]
+            },
+            "put": {
+                "operationId": "auth_user_update_update",
+                "description": "Update the authenticated user's details.",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/User"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "User details retrieved successfully.",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "description": "User ID",
+                                    "type": "integer"
+                                },
+                                "username": {
+                                    "description": "Username",
+                                    "type": "string"
+                                },
+                                "email": {
+                                    "description": "User email",
+                                    "type": "string"
+                                },
+                                "first_name": {
+                                    "description": "First name",
+                                    "type": "string"
+                                },
+                                "last_name": {
+                                    "description": "Last name",
+                                    "type": "string"
+                                },
+                                "date_joined": {
+                                    "description": "Date user joined",
+                                    "type": "string"
+                                },
+                                "is_active": {
+                                    "description": "User active status",
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "email": {
+                                    "description": "Email validation error",
+                                    "type": "string"
+                                },
+                                "first_name": {
+                                    "description": "First name validation error",
+                                    "type": "string"
+                                },
+                                "last_name": {
+                                    "description": "Last name validation error",
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication credentials were not provided."
+                    }
+                },
+                "tags": [
+                    "auth"
+                ]
+            },
+            "patch": {
+                "operationId": "auth_user_update_partial_update",
+                "description": "Partially update the authenticated user's details.",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/User"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "User details retrieved successfully.",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "description": "User ID",
+                                    "type": "integer"
+                                },
+                                "username": {
+                                    "description": "Username",
+                                    "type": "string"
+                                },
+                                "email": {
+                                    "description": "User email",
+                                    "type": "string"
+                                },
+                                "first_name": {
+                                    "description": "First name",
+                                    "type": "string"
+                                },
+                                "last_name": {
+                                    "description": "Last name",
+                                    "type": "string"
+                                },
+                                "date_joined": {
+                                    "description": "Date user joined",
+                                    "type": "string"
+                                },
+                                "is_active": {
+                                    "description": "User active status",
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "email": {
+                                    "description": "Email validation error",
+                                    "type": "string"
+                                },
+                                "first_name": {
+                                    "description": "First name validation error",
+                                    "type": "string"
+                                },
+                                "last_name": {
+                                    "description": "Last name validation error",
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication credentials were not provided."
+                    }
+                },
+                "tags": [
+                    "auth"
+                ]
+            },
+            "parameters": []
+        },
+        "/backups/": {
+            "get": {
+                "operationId": "backups_list",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Backup"
+                            }
+                        }
+                    }
+                },
+                "tags": [
+                    "backups"
+                ]
+            },
+            "post": {
+                "operationId": "backups_create",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/Backup"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Backup"
+                        }
+                    }
+                },
+                "tags": [
+                    "backups"
+                ]
+            },
+            "parameters": []
+        },
+        "/backups/{id}/": {
+            "get": {
+                "operationId": "backups_read",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Backup"
+                        }
+                    }
+                },
+                "tags": [
+                    "backups"
+                ]
+            },
+            "post": {
+                "operationId": "backups_create",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/Backup"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Backup"
+                        }
+                    }
+                },
+                "tags": [
+                    "backups"
+                ]
+            },
+            "delete": {
+                "operationId": "backups_delete",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "204": {
+                        "description": ""
+                    }
+                },
+                "tags": [
+                    "backups"
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "description": "A UUID string identifying this Backup.",
+                    "required": true,
+                    "type": "string",
+                    "format": "uuid"
+                }
+            ]
+        },
+        "/manager/document/": {
+            "get": {
+                "operationId": "manager_document_list",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Document"
+                            }
+                        }
+                    }
+                },
+                "consumes": [
+                    "multipart/form-data",
+                    "application/x-www-form-urlencoded"
+                ],
+                "tags": [
+                    "manager"
+                ]
+            },
+            "post": {
+                "operationId": "manager_document_create",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "name",
+                        "in": "formData",
+                        "required": false,
+                        "type": "string",
+                        "maxLength": 100,
+                        "minLength": 1
+                    },
+                    {
+                        "name": "folder",
+                        "in": "formData",
+                        "required": false,
+                        "type": "string",
+                        "format": "uuid",
+                        "x-nullable": true
+                    },
+                    {
+                        "name": "file",
+                        "in": "formData",
+                        "required": true,
+                        "type": "file"
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Document"
+                        }
+                    }
+                },
+                "consumes": [
+                    "multipart/form-data",
+                    "application/x-www-form-urlencoded"
+                ],
+                "tags": [
+                    "manager"
+                ]
+            },
+            "parameters": []
+        },
+        "/manager/document/revision/{doc_id}/": {
+            "get": {
+                "operationId": "manager_document_revision_list",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Document"
+                            }
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "doc_id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
+        "/manager/document/revision/{doc_id}/{version_id}/": {
+            "get": {
+                "operationId": "manager_document_revision_read",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Document"
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "post": {
+                "operationId": "manager_document_revision_create",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/Document"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Document"
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "doc_id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                },
+                {
+                    "name": "version_id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
+        "/manager/document/{id}/": {
+            "get": {
+                "operationId": "manager_document_read",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Document"
+                        }
+                    }
+                },
+                "consumes": [
+                    "multipart/form-data",
+                    "application/x-www-form-urlencoded"
+                ],
+                "tags": [
+                    "manager"
+                ]
+            },
+            "put": {
+                "operationId": "manager_document_update",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "name",
+                        "in": "formData",
+                        "required": false,
+                        "type": "string",
+                        "maxLength": 100,
+                        "minLength": 1
+                    },
+                    {
+                        "name": "folder",
+                        "in": "formData",
+                        "required": false,
+                        "type": "string",
+                        "format": "uuid",
+                        "x-nullable": true
+                    },
+                    {
+                        "name": "file",
+                        "in": "formData",
+                        "required": true,
+                        "type": "file"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Document"
+                        }
+                    }
+                },
+                "consumes": [
+                    "multipart/form-data",
+                    "application/x-www-form-urlencoded"
+                ],
+                "tags": [
+                    "manager"
+                ]
+            },
+            "delete": {
+                "operationId": "manager_document_delete",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "204": {
+                        "description": ""
+                    }
+                },
+                "consumes": [
+                    "multipart/form-data",
+                    "application/x-www-form-urlencoded"
+                ],
+                "tags": [
+                    "manager"
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "description": "A UUID string identifying this Document.",
+                    "required": true,
+                    "type": "string",
+                    "format": "uuid"
+                }
+            ]
+        },
+        "/manager/folder/": {
+            "get": {
+                "operationId": "manager_folder_list",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Folder"
+                            }
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "post": {
+                "operationId": "manager_folder_create",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/Folder"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Folder"
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "parameters": []
+        },
+        "/manager/folder/{id}/": {
+            "get": {
+                "operationId": "manager_folder_read",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Folder"
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "put": {
+                "operationId": "manager_folder_update",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/Folder"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Folder"
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "delete": {
+                "operationId": "manager_folder_delete",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "204": {
+                        "description": ""
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "description": "A UUID string identifying this Folder.",
+                    "required": true,
+                    "type": "string",
+                    "format": "uuid"
+                }
+            ]
+        },
+        "/manager/permission/": {
+            "get": {
+                "operationId": "manager_permission_list",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Permission"
+                            }
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "post": {
+                "operationId": "manager_permission_create",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/Permission"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Permission"
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "parameters": []
+        },
+        "/manager/permission/{id}/": {
+            "get": {
+                "operationId": "manager_permission_read",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Permission"
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "put": {
+                "operationId": "manager_permission_update",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/Permission"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Permission"
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "delete": {
+                "operationId": "manager_permission_delete",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "204": {
+                        "description": ""
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "description": "A UUID string identifying this permission.",
+                    "required": true,
+                    "type": "string",
+                    "format": "uuid"
+                }
+            ]
+        },
+        "/manager/share/": {
+            "get": {
+                "operationId": "manager_share_list",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/ShareableLink"
+                            }
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "post": {
+                "operationId": "manager_share_create",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ShareableLink"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/ShareableLink"
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "parameters": []
+        },
+        "/manager/share/{id}/": {
+            "put": {
+                "operationId": "manager_share_update",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ShareableLink"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/ShareableLink"
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "delete": {
+                "operationId": "manager_share_delete",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "204": {
+                        "description": ""
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "description": "A UUID string identifying this shareable link.",
+                    "required": true,
+                    "type": "string",
+                    "format": "uuid"
+                }
+            ]
+        },
+        "/manager/share/{token}/": {
+            "get": {
+                "operationId": "manager_share_read",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/ShareableLink"
+                        }
+                    }
+                },
+                "tags": [
+                    "manager"
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "token",
+                    "in": "path",
+                    "required": true,
+                    "type": "string",
+                    "format": "uuid"
+                }
+            ]
+        },
+        "/workflows/template/": {
+            "get": {
+                "operationId": "workflows_template_list",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Template"
+                            }
+                        }
+                    }
+                },
+                "consumes": [
+                    "multipart/form-data",
+                    "application/x-www-form-urlencoded"
+                ],
+                "tags": [
+                    "workflows"
+                ]
+            },
+            "post": {
+                "operationId": "workflows_template_create",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "name",
+                        "in": "formData",
+                        "required": false,
+                        "type": "string",
+                        "maxLength": 100,
+                        "minLength": 1
+                    },
+                    {
+                        "name": "file",
+                        "in": "formData",
+                        "required": true,
+                        "type": "file"
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Template"
+                        }
+                    }
+                },
+                "consumes": [
+                    "multipart/form-data",
+                    "application/x-www-form-urlencoded"
+                ],
+                "tags": [
+                    "workflows"
+                ]
+            },
+            "parameters": []
+        },
+        "/workflows/template/{id}/": {
+            "get": {
+                "operationId": "workflows_template_read",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Template"
+                        }
+                    }
+                },
+                "consumes": [
+                    "multipart/form-data",
+                    "application/x-www-form-urlencoded"
+                ],
+                "tags": [
+                    "workflows"
+                ]
+            },
+            "post": {
+                "operationId": "workflows_template_insert",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Document"
+                        }
+                    }
+                },
+                "consumes": [
+                    "multipart/form-data",
+                    "application/x-www-form-urlencoded"
+                ],
+                "tags": [
+                    "workflows"
+                ]
+            },
+            "put": {
+                "operationId": "workflows_template_update",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "name",
+                        "in": "formData",
+                        "required": false,
+                        "type": "string",
+                        "maxLength": 100,
+                        "minLength": 1
+                    },
+                    {
+                        "name": "file",
+                        "in": "formData",
+                        "required": true,
+                        "type": "file"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/Template"
+                        }
+                    }
+                },
+                "consumes": [
+                    "multipart/form-data",
+                    "application/x-www-form-urlencoded"
+                ],
+                "tags": [
+                    "workflows"
+                ]
+            },
+            "delete": {
+                "operationId": "workflows_template_delete",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "204": {
+                        "description": ""
+                    }
+                },
+                "consumes": [
+                    "multipart/form-data",
+                    "application/x-www-form-urlencoded"
+                ],
+                "tags": [
+                    "workflows"
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "description": "A UUID string identifying this Template.",
+                    "required": true,
+                    "type": "string",
+                    "format": "uuid"
+                }
+            ]
+        }
+    },
+    "definitions": {
+        "TokenObtainPair": {
+            "required": [
+                "username",
+                "password"
+            ],
+            "type": "object",
+            "properties": {
+                "username": {
+                    "title": "Username",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "password": {
+                    "title": "Password",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "PasswordResetConfirm": {
+            "required": [
+                "email",
+                "new_password",
+                "new_password2"
+            ],
+            "type": "object",
+            "properties": {
+                "email": {
+                    "title": "Email",
+                    "description": "Email of the user requesting password reset.",
+                    "type": "string",
+                    "format": "email",
+                    "minLength": 1
+                },
+                "new_password": {
+                    "title": "New password",
+                    "description": "New password.",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "new_password2": {
+                    "title": "New password2",
+                    "description": "Confirm new password.",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "Register": {
+            "required": [
+                "username",
+                "password",
+                "password2",
+                "first_name",
+                "last_name"
+            ],
+            "type": "object",
+            "properties": {
+                "username": {
+                    "title": "Username",
+                    "description": "Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only.",
+                    "type": "string",
+                    "pattern": "^[\\w.@+-]+$",
+                    "maxLength": 150,
+                    "minLength": 1
+                },
+                "password": {
+                    "title": "Password",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "password2": {
+                    "title": "Password2",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "email": {
+                    "title": "Email address",
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 254
+                },
+                "first_name": {
+                    "title": "First name",
+                    "type": "string",
+                    "maxLength": 150
+                },
+                "last_name": {
+                    "title": "Last name",
+                    "type": "string",
+                    "maxLength": 150
+                }
+            }
+        },
+        "TokenRefresh": {
+            "required": [
+                "refresh"
+            ],
+            "type": "object",
+            "properties": {
+                "refresh": {
+                    "title": "Refresh",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "access": {
+                    "title": "Access",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1
+                }
+            }
+        },
+        "User": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "ID",
+                    "type": "integer",
+                    "readOnly": true
+                },
+                "username": {
+                    "title": "Username",
+                    "description": "Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only.",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1
+                },
+                "email": {
+                    "title": "Email address",
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 254
+                },
+                "first_name": {
+                    "title": "First name",
+                    "type": "string",
+                    "maxLength": 150
+                },
+                "last_name": {
+                    "title": "Last name",
+                    "type": "string",
+                    "maxLength": 150
+                }
+            }
+        },
+        "Backup": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true
+                },
+                "file": {
+                    "title": "File",
+                    "type": "string",
+                    "readOnly": true,
+                    "x-nullable": true,
+                    "format": "uri"
+                },
+                "created_at": {
+                    "title": "Created at",
+                    "type": "string",
+                    "format": "date-time",
+                    "readOnly": true
+                }
+            }
+        },
+        "Document": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true
+                },
+                "name": {
+                    "title": "Name",
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 1
+                },
+                "folder": {
+                    "title": "Folder",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "file": {
+                    "title": "File",
+                    "type": "string",
+                    "readOnly": true,
+                    "format": "uri"
+                },
+                "created_at": {
+                    "title": "Created at",
+                    "type": "string",
+                    "format": "date-time",
+                    "readOnly": true
+                },
+                "updated_at": {
+                    "title": "Updated at",
+                    "type": "string",
+                    "format": "date-time",
+                    "readOnly": true
+                }
+            }
+        },
+        "Folder": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "title": "Name",
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 1
+                },
+                "parent": {
+                    "title": "Parent",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true
+                },
+                "folders": {
+                    "title": "Folders",
+                    "type": "string",
+                    "readOnly": true
+                },
+                "documents": {
+                    "title": "Documents",
+                    "type": "string",
+                    "readOnly": true
+                }
+            }
+        },
+        "Permission": {
+            "required": [
+                "user",
+                "level"
+            ],
+            "type": "object",
+            "properties": {
+                "user": {
+                    "title": "User",
+                    "type": "integer"
+                },
+                "document": {
+                    "title": "Document",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "folder": {
+                    "title": "Folder",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "level": {
+                    "title": "Level",
+                    "type": "string",
+                    "enum": [
+                        "read",
+                        "write",
+                        "delete"
+                    ]
+                },
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true
+                }
+            }
+        },
+        "ShareableLink": {
+            "required": [
+                "document",
+                "created_by"
+            ],
+            "type": "object",
+            "properties": {
+                "document": {
+                    "title": "Document",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "token": {
+                    "title": "Token",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true
+                },
+                "created_at": {
+                    "title": "Created at",
+                    "type": "string",
+                    "format": "date-time",
+                    "readOnly": true
+                },
+                "expires_at": {
+                    "title": "Expires at",
+                    "type": "string",
+                    "format": "date-time",
+                    "x-nullable": true
+                },
+                "is_active": {
+                    "title": "Is active",
+                    "type": "boolean"
+                },
+                "created_by": {
+                    "title": "Created by",
+                    "type": "integer"
+                },
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true
+                }
+            }
+        },
+        "Template": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "title": "Name",
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 1
+                },
+                "file": {
+                    "title": "File",
+                    "type": "string",
+                    "readOnly": true,
+                    "format": "uri"
+                },
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid",
+                    "readOnly": true
+                }
+            }
+        }
+    }
+}

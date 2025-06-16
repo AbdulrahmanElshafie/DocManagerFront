@@ -18,7 +18,7 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="A document management application.">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -29,8 +29,14 @@
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>doc_manager</title>
+  <title>Document Manager</title>
   <link rel="manifest" href="manifest.json">
+  
+  <!-- PDF.js for SfPdfViewer web integration -->
+  <script src="//cdnjs.cloudflare.com/ajax/libs/pdf.js/2.4.456/pdf.min.js"></script>
+  <script type="text/javascript">
+     pdfjsLib.GlobalWorkerOptions.workerSrc = "//cdnjs.cloudflare.com/ajax/libs/pdf.js/2.4.456/pdf.worker.min.js";
+  </script>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
