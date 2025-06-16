@@ -8,14 +8,6 @@ abstract class UserEvent extends Equatable {
   List<Object?> get props => [];
 }
 
-class LoadUsers extends UserEvent {
-  const LoadUsers();
-}
-
-class GetCurrentUser extends UserEvent {
-  const GetCurrentUser();
-}
-
 class LoadUser extends UserEvent {
   final String id;
   
@@ -23,6 +15,14 @@ class LoadUser extends UserEvent {
   
   @override
   List<Object?> get props => [id];
+}
+
+class LoadUsers extends UserEvent {
+  const LoadUsers();
+}
+
+class GetCurrentUser extends UserEvent {
+  const GetCurrentUser();
 }
 
 class CreateUser extends UserEvent {
@@ -79,18 +79,27 @@ class UpdateUserPassword extends UserEvent {
 }
 
 class UpdateUser extends UserEvent {
-  final String id;
-  final String parentId;
-  final String name;
+  final User user;
   
-  const UpdateUser({
-    required this.id,
-    required this.parentId,
-    required this.name
+  const UpdateUser(this.user);
+  
+  @override
+  List<Object?> get props => [user];
+}
+
+class ResetPassword extends UserEvent {
+  final String currentPassword;
+  final String newPassword;
+  final String confirmPassword;
+  
+  const ResetPassword({
+    required this.currentPassword,
+    required this.newPassword,
+    required this.confirmPassword,
   });
   
   @override
-  List<Object?> get props => [id, parentId, name];
+  List<Object?> get props => [currentPassword, newPassword, confirmPassword];
 }
 
 class DeleteUser extends UserEvent {

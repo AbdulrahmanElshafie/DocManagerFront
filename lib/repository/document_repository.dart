@@ -23,8 +23,7 @@ class DocumentRepository {
         final response = await _apiService.post(API.document, {
           'folder': folderId,
           'name': name,
-          'content': 'Document content',
-          'type': _inferTypeFromFileName(name),
+          'document_type': _inferTypeFromFileName(name),
         }, {});
         
         return Document.fromJson(response);
@@ -498,5 +497,43 @@ class DocumentRepository {
       'version_id': versionId,
     });
     return response;
+  }
+
+  // New method specifically for web file uploads using bytes
+  Future<Document> createDocumentFromBytes(
+      String folderId, List<int> fileBytes, String fileName, String name) async {
+    try {
+      developer.log('Creating document from bytes: $fileName with name: $name', name: 'DocumentRepository');
+      developer.log('File size: ${fileBytes.length} bytes', name: 'DocumentRepository');
+      
+      // Check if file extension is allowed
+      final fileExt = path.extension(fileName).toLowerCase();
+      if (fileExt != '.pdf' && fileExt != '.csv' && fileExt != '.docx') {
+        throw Exception('Only PDF, CSV, and DOCX files are supported.');
+      }
+      
+      // Use the new uploadFileFromBytes method
+      final response = await _apiService.uploadFileFromBytes(
+        API.document,
+        fileBytes,
+        fileName,
+        {
+          'folder': folderId,
+          'name': name,
+        }
+      );
+      
+      if (response == null || response.isEmpty) {
+        throw Exception('Empty response received when creating document');
+      }
+      
+      // Log successful upload
+      developer.log('Document created successfully from bytes with response: $response', name: 'DocumentRepository');
+      
+      return Document.fromJson(response);
+    } catch (e) {
+      developer.log('Error creating document from bytes: $e', name: 'DocumentRepository');
+      rethrow;
+    }
   }
 }

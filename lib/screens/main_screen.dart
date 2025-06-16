@@ -1,4 +1,3 @@
-import 'package:doc_manager/screens/backups_screen.dart';
 import 'package:doc_manager/screens/documents_screen.dart';
 import 'package:doc_manager/screens/folders_screen.dart';
 import 'package:doc_manager/screens/login_screen.dart';
@@ -171,14 +170,12 @@ class _MainScreenState extends State<MainScreen> {
   final List<Widget> _desktopScreens = [
     const FoldersScreen(),
     const DocumentsScreen(),
-    const BackupsScreen(),
     const SettingsScreen(),
   ];
   
   final List<String> _screenTitles = [
     'Folders',
     'Documents',
-    'Backups',
     'Settings',
   ];
   
@@ -218,10 +215,6 @@ class _MainScreenState extends State<MainScreen> {
             label: 'Documents',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.backup),
-            label: 'Backups',
-          ),
-          BottomNavigationBarItem(
             icon: Icon(Icons.settings),
             label: 'Settings',
           ),
@@ -246,10 +239,6 @@ class _MainScreenState extends State<MainScreen> {
               NavigationRailDestination(
                 icon: Icon(Icons.description),
                 label: Text('Documents'),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.backup),
-                label: Text('Backups'),
               ),
               NavigationRailDestination(
                 icon: Icon(Icons.settings),
@@ -327,17 +316,10 @@ class _MainScreenState extends State<MainScreen> {
                         onTap: () => _onItemTapped(1),
                       ),
                       ListTile(
-                        leading: const Icon(Icons.backup),
-                        title: const Text('Backups'),
-                        selected: _selectedIndex == 2,
-                        onTap: () => _onItemTapped(2),
-                      ),
-                      const Divider(),
-                      ListTile(
                         leading: const Icon(Icons.settings),
                         title: const Text('Settings'),
-                        selected: _selectedIndex == 3,
-                        onTap: () => _onItemTapped(3),
+                        selected: _selectedIndex == 2,
+                        onTap: () => _onItemTapped(2),
                       ),
                     ],
                   ),

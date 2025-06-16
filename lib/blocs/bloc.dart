@@ -10,9 +10,7 @@ export 'folder/folder_bloc.dart';
 export 'folder/folder_event.dart';
 export 'folder/folder_state.dart';
 
-export 'permission/permission_bloc.dart';
-export 'permission/permission_event.dart';
-export 'permission/permission_state.dart';
+
 
 export 'version/version_bloc.dart';
 export 'version/version_event.dart';
@@ -26,6 +24,8 @@ export 'shareable_link/shareable_link_bloc.dart';
 export 'shareable_link/shareable_link_event.dart';
 export 'shareable_link/shareable_link_state.dart';
 
-export 'backup/backup_bloc.dart';
-export 'backup/backup_event.dart';
-export 'backup/backup_state.dart'; 
+export 'activity_log/activity_log_bloc.dart';
+export 'activity_log/activity_log_event.dart';
+export 'activity_log/activity_log_state.dart';
+
+ 

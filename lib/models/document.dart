@@ -96,10 +96,10 @@ class Document extends Equatable {
       name: json['name'] ?? '',
       file: fileObj,
       filePath: filePathStr,
-      ownerId: json['owner'] ?? '',
+      ownerId: json['owner']?.toString() ?? '',
       createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
       updatedAt: json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null,
-      folderId: json['folder'] ?? '',
+      folderId: json['folder']?.toString() ?? '',
       type: docType,
     );
   }
@@ -192,6 +192,18 @@ class Document extends Equatable {
       type: type,
       folderId: folderId,
       ownerId: '', // Will be set by the server
+      createdAt: DateTime.now(),
+    );
+  }
+
+  // Factory method to create a completely empty document
+  factory Document.emptyDefault() {
+    return Document(
+      id: '',
+      name: '',
+      type: DocumentType.unsupported,
+      folderId: '',
+      ownerId: '',
       createdAt: DateTime.now(),
     );
   }

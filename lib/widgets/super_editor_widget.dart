@@ -2,13 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:markdown/markdown.dart' as md;
+import 'dart:async';
 import '../models/document.dart' as doc_model;
+import '../shared/network/api_service.dart';
+import '../shared/services/websocket_service.dart';
 import '../shared/utils/logger.dart';
 
 class SuperEditorWidget extends StatefulWidget {
   final doc_model.Document document;
   final String? initialContent;
-  final String contentFormat; // 'html' or 'markdown'
+  final String contentFormat;
   final Function(String content, String contentType)? onSave;
 
   const SuperEditorWidget({
@@ -29,8 +32,17 @@ class _SuperEditorWidgetState extends State<SuperEditorWidget> {
   late Editor _editor;
   
   bool _isLoading = true;
-  bool _hasChanges = false;
-  String? _errorMessage;
+  bool _isSaving = false;
+  bool _hasUnsavedChanges = false;
+  bool _isDocumentFileCreated = false;
+  
+  // WebSocket integration
+  WebSocketService? _websocketService;
+  StreamSubscription? _websocketSubscription;
+  
+  // Auto-save functionality
+  Timer? _saveTimer;
+  String _lastSavedContent = '';
 
   @override
   void initState() {
@@ -38,203 +50,435 @@ class _SuperEditorWidgetState extends State<SuperEditorWidget> {
     _initializeEditor();
   }
 
+  @override
+  void dispose() {
+    _websocketSubscription?.cancel();
+    _websocketService?.disconnect();
+    _saveTimer?.cancel();
+    super.dispose();
+  }
+
   void _initializeEditor() {
+    // Create document with empty content initially
+    _document = MutableDocument(
+      nodes: [
+        ParagraphNode(
+          id: Editor.createNodeId(),
+          text: AttributedText(''),
+        )
+      ],
+    );
+    
+    _composer = MutableDocumentComposer();
+    _editor = createDefaultDocumentEditor(
+      document: _document, 
+      composer: _composer,
+    );
+    
+    // Listen for document changes
+    _document.addListener((changeLog) => _onDocumentChanged());
+    
+    _loadDocumentContent();
+    _setupWebSocket();
+  }
+
+  void _setupWebSocket() {
     try {
-      // Create empty document
-      _document = MutableDocument(
-        nodes: [
-          ParagraphNode(
-            id: Editor.createNodeId(),
-            text: AttributedText('Start typing...'),
-          ),
-        ],
-      );
-      _composer = MutableDocumentComposer();
+      _websocketService = WebSocketService();
+      _websocketService!.connectToDocument(widget.document.id);
       
-      // Create editor
-      _editor = createDefaultDocumentEditor(
-        document: _document,
-        composer: _composer,
-      );
-
-      // Load initial content if provided
-      if (widget.initialContent != null && widget.initialContent!.isNotEmpty) {
-        _loadContent(widget.initialContent!, widget.contentFormat);
-      }
-
-      setState(() {
-        _isLoading = false;
+      _websocketSubscription = _websocketService!.saveStatus.listen((status) {
+        setState(() {
+          _isSaving = false;
+          if (status.success) {
+            _hasUnsavedChanges = false;
+          }
+        });
+        if (status.success) {
+          LoggerUtil.info('Document auto-saved successfully');
+          if (!status.isAutoSave) {
+            _showSuccessMessage('Document saved successfully');
+          }
+        } else {
+          LoggerUtil.error('Auto-save failed');
+          _showErrorMessage('Auto-save failed');
+        }
       });
     } catch (e) {
-      LoggerUtil.error('Error initializing Super Editor: $e');
-      setState(() {
-        _errorMessage = e.toString();
-        _isLoading = false;
-      });
+      LoggerUtil.error('Failed to setup WebSocket: $e');
     }
   }
 
-  void _loadContent(String content, String format) {
+  void _showSuccessMessage(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white),
+              const SizedBox(width: 8),
+              Text(message),
+            ],
+          ),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _showErrorMessage(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error, color: Colors.white),
+              const SizedBox(width: 8),
+              Expanded(child: Text(message)),
+            ],
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _loadDocumentContent() async {
     try {
-      // Clear existing content
-      if (_document.nodeCount > 0) {
-        final firstNode = _document.getNodeAt(0)!;
-        _document.deleteNode(firstNode.id);
-      }
+      setState(() => _isLoading = true);
       
-      if (format == 'html') {
-        _loadHtmlContent(content);
-      } else if (format == 'markdown') {
-        _loadMarkdownContent(content);
+      String content = widget.initialContent ?? '';
+      
+      // Check if document has an associated file
+      _isDocumentFileCreated = widget.document.file != null && widget.document.file!.path.isNotEmpty;
+      
+      if (content.isEmpty && _isDocumentFileCreated) {
+        // Load content from backend
+        final apiService = ApiService();
+        try {
+          final response = await apiService.getDocumentContent(widget.document.id, 'html');
+          content = response['content'] ?? '';
+        } catch (e) {
+          LoggerUtil.error('Failed to load document content: $e');
+          // If document has no file yet, start with default content
+          if (e.toString().contains('No file associated')) {
+            _isDocumentFileCreated = false;
+            content = '';
+          } else {
+            content = '<p>Error loading document content</p>';
+          }
+        }
+      }
+
+      if (content.isEmpty) {
+        content = '<p>Start writing your document...</p>';
+      }
+
+      _lastSavedContent = content;
+      _parseContentToDocument(content);
+      
+      setState(() => _isLoading = false);
+    } catch (e) {
+      LoggerUtil.error('Error loading document content: $e');
+      setState(() => _isLoading = false);
+    }
+  }
+
+  void _parseContentToDocument(String content) {
+    try {
+      List<DocumentNode> nodes = [];
+      
+      if (widget.contentFormat == 'html') {
+        nodes = _parseHtmlContent(content);
+      } else if (widget.contentFormat == 'markdown') {
+        nodes = _parseMarkdownContent(content);
       } else {
         // Plain text
-        _loadPlainTextContent(content);
+        nodes = [
+          ParagraphNode(
+            id: Editor.createNodeId(),
+            text: AttributedText(content),
+          )
+        ];
+      }
+
+      if (nodes.isEmpty) {
+        nodes = [
+          ParagraphNode(
+            id: Editor.createNodeId(),
+            text: AttributedText(''),
+          )
+        ];
+      }
+
+      // Clear existing content and add new nodes
+      while (_document.nodeCount > 0) {
+        _document.deleteNodeAt(0);
+      }
+      
+      for (final node in nodes) {
+        _document.add(node);
       }
       
     } catch (e) {
-      LoggerUtil.error('Error loading content: $e');
-      // Fallback to plain text
-      _loadPlainTextContent(content);
+      LoggerUtil.error('Error parsing content: $e');
+      // Clear document and add error message
+      while (_document.nodeCount > 0) {
+        _document.deleteNodeAt(0);
+      }
+      _document.add(ParagraphNode(
+        id: Editor.createNodeId(),
+        text: AttributedText('Error parsing document content'),
+      ));
     }
   }
 
-  void _loadHtmlContent(String htmlContent) {
+  List<DocumentNode> _parseHtmlContent(String htmlContent) {
     final document = html_parser.parse(htmlContent);
     final body = document.body;
     
     if (body == null) {
-      _loadPlainTextContent(htmlContent);
-      return;
+      return [ParagraphNode(id: Editor.createNodeId(), text: AttributedText(''))];
     }
 
-    // Simple HTML parsing - just extract text and basic formatting
-    final text = body.text.trim();
-    if (text.isNotEmpty) {
-      _document.insertNodeAt(0, ParagraphNode(
-        id: Editor.createNodeId(),
-        text: AttributedText(text),
-      ));
-    } else {
-      _document.insertNodeAt(0, ParagraphNode(
-        id: Editor.createNodeId(),
-        text: AttributedText(''),
-      ));
+    List<DocumentNode> nodes = [];
+    
+    for (final element in body.children) {
+      switch (element.localName?.toLowerCase()) {
+        case 'h1':
+          nodes.add(ParagraphNode(
+            id: Editor.createNodeId(),
+            text: AttributedText(element.text),
+            metadata: {'blockType': header1Attribution},
+          ));
+          break;
+        case 'h2':
+          nodes.add(ParagraphNode(
+            id: Editor.createNodeId(),
+            text: AttributedText(element.text),
+            metadata: {'blockType': header2Attribution},
+          ));
+          break;
+        case 'h3':
+          nodes.add(ParagraphNode(
+            id: Editor.createNodeId(),
+            text: AttributedText(element.text),
+            metadata: {'blockType': header3Attribution},
+          ));
+          break;
+        case 'ul':
+          for (final li in element.children.where((e) => e.localName == 'li')) {
+            nodes.add(ListItemNode.unordered(
+              id: Editor.createNodeId(),
+              text: AttributedText(li.text),
+            ));
+          }
+          break;
+        case 'ol':
+          for (final li in element.children.where((e) => e.localName == 'li')) {
+            nodes.add(ListItemNode.ordered(
+              id: Editor.createNodeId(),
+              text: AttributedText(li.text),
+            ));
+          }
+          break;
+        case 'p':
+        default:
+          final text = element.text.trim();
+          if (text.isNotEmpty) {
+            nodes.add(ParagraphNode(
+              id: Editor.createNodeId(),
+              text: AttributedText(text),
+            ));
+          }
+          break;
+      }
     }
+
+    return nodes.isEmpty ? [ParagraphNode(id: Editor.createNodeId(), text: AttributedText(''))] : nodes;
   }
 
-  void _loadMarkdownContent(String markdownContent) {
-    // Convert markdown to HTML first, then parse
+  List<DocumentNode> _parseMarkdownContent(String markdownContent) {
     final htmlContent = md.markdownToHtml(markdownContent);
-    _loadHtmlContent(htmlContent);
+    return _parseHtmlContent(htmlContent);
   }
 
-  void _loadPlainTextContent(String textContent) {
-    final lines = textContent.split('\n');
+  void _onDocumentChanged() {
+    setState(() {
+      _hasUnsavedChanges = true;
+    });
     
-    for (int i = 0; i < lines.length; i++) {
-      _document.insertNodeAt(i, ParagraphNode(
-        id: Editor.createNodeId(),
-        text: AttributedText(lines[i]),
-      ));
+    if (_saveTimer?.isActive == true) {
+      _saveTimer!.cancel();
     }
-
-    // If no content, add empty paragraph
-    if (lines.isEmpty || (lines.length == 1 && lines[0].isEmpty)) {
-      _document.insertNodeAt(0, ParagraphNode(
-        id: Editor.createNodeId(),
-        text: AttributedText(''),
-      ));
-    }
+    
+    _saveTimer = Timer(const Duration(seconds: 3), () {
+      _autoSaveDocument();
+    });
   }
 
-  String _exportToHtml() {
-    final buffer = StringBuffer();
-    buffer.writeln('<html><body>');
-    
-    for (int i = 0; i < _document.nodeCount; i++) {
-      final node = _document.getNodeAt(i);
-      if (node is TextNode) {
-        final text = node.text.toPlainText();
-        
-        if (node is ParagraphNode) {
-          buffer.writeln('<p>$text</p>');
-        } else if (node is ListItemNode) {
-          if (node.type == ListItemType.ordered) {
-            buffer.writeln('<ol><li>$text</li></ol>');
-          } else {
-            buffer.writeln('<ul><li>$text</li></ul>');
-          }
-        } else {
-          buffer.writeln('<p>$text</p>');
-        }
+  Future<void> _autoSaveDocument() async {
+    if (_isSaving) return;
+
+    try {
+      final currentContent = _documentToHtml();
+      if (currentContent == _lastSavedContent) return;
+
+      setState(() => _isSaving = true);
+      
+      // If document file is not created yet, create it first
+      if (!_isDocumentFileCreated) {
+        await _createDocumentFile(currentContent);
+        return; // _createDocumentFile will handle the saving
       }
-    }
-    
-    buffer.writeln('</body></html>');
-    return buffer.toString();
-  }
-
-  String _exportToMarkdown() {
-    final buffer = StringBuffer();
-    
-    for (int i = 0; i < _document.nodeCount; i++) {
-      final node = _document.getNodeAt(i);
-      if (node is TextNode) {
-        final text = node.text.toPlainText();
-        
-        if (node is ParagraphNode) {
-          buffer.writeln(text);
-        } else if (node is ListItemNode) {
-          if (node.type == ListItemType.ordered) {
-            buffer.writeln('1. $text');
-          } else {
-            buffer.writeln('- $text');
-          }
-        } else {
-          buffer.writeln(text);
-        }
-        buffer.writeln(); // Add blank line between paragraphs
-      }
-    }
-    
-    return buffer.toString().trim();
-  }
-
-  void _saveContent() {
-    if (widget.onSave != null) {
-      try {
-        String content;
-        String contentType;
-        
-        if (widget.contentFormat == 'markdown') {
-          content = _exportToMarkdown();
-          contentType = 'markdown';
-        } else {
-          content = _exportToHtml();
-          contentType = 'html';
-        }
-        
-        widget.onSave!(content, contentType);
-        
+      
+      if (_websocketService != null) {
+        _websocketService!.sendContentUpdate(currentContent, widget.contentFormat);
+      } else {
+        // Fallback to direct API call
+        final apiService = ApiService();
+        await apiService.updateDocumentContent(
+          widget.document.id,
+          currentContent,
+          widget.contentFormat,
+        );
         setState(() {
-          _hasChanges = false;
+          _isSaving = false;
+          _hasUnsavedChanges = false;
         });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Document saved successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } catch (e) {
-        LoggerUtil.error('Error saving document: $e');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving document: $e'),
-            backgroundColor: Colors.red,
-          ),
+      }
+      
+      _lastSavedContent = currentContent;
+      
+    } catch (e) {
+      LoggerUtil.error('Auto-save failed: $e');
+      setState(() => _isSaving = false);
+      
+      // If it's a "no file associated" error, try to create the file
+      if (e.toString().contains('No file associated')) {
+        final currentContent = _documentToHtml();
+        await _createDocumentFile(currentContent);
+      }
+    }
+  }
+
+  Future<void> _createDocumentFile(String content) async {
+    try {
+      setState(() => _isSaving = true);
+      
+      final apiService = ApiService();
+      
+      // Update document with document_type to trigger file creation
+      await apiService.put('/manager/document/', {
+        'name': widget.document.name,
+        'folder': widget.document.folderId,
+        'document_type': 'docx', // Specify DOCX type for backend to create empty file
+      }, widget.document.id);
+      
+      // Wait a moment for file creation
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Now update the content
+      await apiService.updateDocumentContent(
+        widget.document.id,
+        content,
+        'html',
+      );
+      
+      setState(() {
+        _isDocumentFileCreated = true;
+        _isSaving = false;
+        _hasUnsavedChanges = false;
+      });
+      
+      _lastSavedContent = content;
+      _showSuccessMessage('Document file created and saved');
+      
+    } catch (e) {
+      LoggerUtil.error('Failed to create document file: $e');
+      setState(() => _isSaving = false);
+      _showErrorMessage('Failed to create document file: $e');
+    }
+  }
+
+  String _documentToHtml() {
+    try {
+      final buffer = StringBuffer();
+      
+      for (int i = 0; i < _document.nodeCount; i++) {
+        final node = _document.getNodeAt(i);
+        if (node is ParagraphNode) {
+          final blockType = node.getMetadataValue('blockType');
+          final text = node.text.toPlainText();
+          
+          if (blockType == header1Attribution) {
+            buffer.writeln('<h1>$text</h1>');
+          } else if (blockType == header2Attribution) {
+            buffer.writeln('<h2>$text</h2>');
+          } else if (blockType == header3Attribution) {
+            buffer.writeln('<h3>$text</h3>');
+          } else {
+            buffer.writeln('<p>$text</p>');
+          }
+        } else if (node is ListItemNode) {
+          final text = node.text.toPlainText();
+          if (node.type == ListItemType.unordered) {
+            buffer.writeln('<ul><li>$text</li></ul>');
+          } else {
+            buffer.writeln('<ol><li>$text</li></ol>');
+          }
+        }
+      }
+      
+      return buffer.toString();
+    } catch (e) {
+      LoggerUtil.error('Error converting document to HTML: $e');
+      return '<p>Error converting document</p>';
+    }
+  }
+
+  Future<void> _manualSave() async {
+    try {
+      setState(() => _isSaving = true);
+      
+      final content = _documentToHtml();
+      
+      // If document file is not created yet, create it first
+      if (!_isDocumentFileCreated) {
+        await _createDocumentFile(content);
+        return;
+      }
+      
+      if (_websocketService != null) {
+        _websocketService!.forceSave();
+      } else {
+        final apiService = ApiService();
+        await apiService.updateDocumentContent(
+          widget.document.id,
+          content,
+          widget.contentFormat,
         );
       }
+      
+      if (widget.onSave != null) {
+        widget.onSave!(content, widget.contentFormat);
+      }
+      
+      _lastSavedContent = content;
+      
+      _showSuccessMessage('Document saved successfully');
+      
+      setState(() {
+        _hasUnsavedChanges = false;
+      });
+      
+    } catch (e) {
+      LoggerUtil.error('Manual save failed: $e');
+      _showErrorMessage('Save failed: $e');
+    } finally {
+      setState(() => _isSaving = false);
     }
   }
 
@@ -242,29 +486,12 @@ class _SuperEditorWidgetState extends State<SuperEditorWidget> {
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Center(
-        child: CircularProgressIndicator(),
-      );
-    }
-
-    if (_errorMessage != null) {
-      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 64, color: Colors.red),
-            const SizedBox(height: 16),
-            Text('Error: $_errorMessage'),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  _errorMessage = null;
-                  _isLoading = true;
-                });
-                _initializeEditor();
-              },
-              child: const Text('Retry'),
-            ),
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Loading document...'),
           ],
         ),
       );
@@ -274,48 +501,261 @@ class _SuperEditorWidgetState extends State<SuperEditorWidget> {
       children: [
         // Toolbar
         Container(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: Theme.of(context).colorScheme.surface,
             border: Border(
               bottom: BorderSide(color: Theme.of(context).dividerColor),
             ),
           ),
           child: Row(
             children: [
+              // Bold (simplified for compatibility)
               IconButton(
+                onPressed: () {
+                  LoggerUtil.info('Bold formatting requested');
+                  // TODO: Implement when super_editor API is stable
+                },
                 icon: const Icon(Icons.format_bold),
-                onPressed: () {
-                  // TODO: Implement bold formatting
-                },
+                tooltip: 'Bold',
               ),
+              // Italic (simplified for compatibility)
               IconButton(
+                onPressed: () {
+                  LoggerUtil.info('Italic formatting requested');
+                  // TODO: Implement when super_editor API is stable
+                },
                 icon: const Icon(Icons.format_italic),
-                onPressed: () {
-                  // TODO: Implement italic formatting
-                },
+                tooltip: 'Italic',
               ),
+              // Underline (simplified for compatibility)
               IconButton(
-                icon: const Icon(Icons.format_underlined),
                 onPressed: () {
-                  // TODO: Implement underline formatting
+                  LoggerUtil.info('Underline formatting requested');
+                  // TODO: Implement when super_editor API is stable
                 },
+                icon: const Icon(Icons.format_underlined),
+                tooltip: 'Underline',
+              ),
+              const VerticalDivider(),
+              // Header (simplified for compatibility)
+              IconButton(
+                onPressed: () {
+                  LoggerUtil.info('Header formatting requested');
+                  // TODO: Implement when super_editor API is stable
+                },
+                icon: const Icon(Icons.title),
+                tooltip: 'Header',
+              ),
+              // Bullet List (simplified for compatibility)
+              IconButton(
+                onPressed: () {
+                  LoggerUtil.info('Bullet list requested');
+                  // TODO: Implement when super_editor API is stable
+                },
+                icon: const Icon(Icons.format_list_bulleted),
+                tooltip: 'Bullet List',
+              ),
+              // Numbered List (simplified for compatibility)
+              IconButton(
+                onPressed: () {
+                  LoggerUtil.info('Numbered list requested');
+                  // TODO: Implement when super_editor API is stable
+                },
+                icon: const Icon(Icons.format_list_numbered),
+                tooltip: 'Numbered List',
               ),
               const Spacer(),
-              if (_hasChanges)
-                ElevatedButton(
-                  onPressed: _saveContent,
-                  child: const Text('Save'),
+              // Connection status
+              if (_websocketService != null)
+                StreamBuilder<bool>(
+                  stream: _websocketService!.connectionState,
+                  builder: (context, snapshot) {
+                    final isConnected = snapshot.data ?? false;
+                    return Row(
+                      children: [
+                        Icon(
+                          isConnected ? Icons.cloud_done : Icons.cloud_off,
+                          color: isConnected ? Colors.green : Colors.red,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          isConnected ? 'Connected' : 'Offline',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    );
+                  },
                 ),
+              const SizedBox(width: 16),
+              // Unsaved changes indicator
+              if (_hasUnsavedChanges)
+                const Row(
+                  children: [
+                    Icon(Icons.edit, size: 16, color: Colors.orange),
+                    SizedBox(width: 4),
+                    Text('Unsaved', style: TextStyle(color: Colors.orange, fontSize: 12)),
+                    SizedBox(width: 8),
+                  ],
+                ),
+              // Save button
+              ElevatedButton.icon(
+                onPressed: _isSaving ? null : _manualSave,
+                icon: _isSaving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save),
+                label: Text(_isSaving ? 'Saving...' : 'Save'),
+              ),
             ],
           ),
         ),
+        // Status bar
+        if (!_isDocumentFileCreated)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: Colors.orange.shade100,
+            child: const Row(
+              children: [
+                Icon(Icons.info, color: Colors.orange),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Document file will be created when you start typing and save.',
+                    style: TextStyle(color: Colors.orange),
+                  ),
+                ),
+              ],
+            ),
+          ),
         // Editor
         Expanded(
-          child: SuperEditor(
-            editor: _editor,
-            stylesheet: defaultStylesheet.copyWith(
-              documentPadding: const EdgeInsets.all(16),
+          child: Container(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            child: SuperEditor(
+              editor: _editor,
+              composer: _composer,
+              componentBuilders: defaultComponentBuilders,
+              stylesheet: Stylesheet(
+                rules: [
+                  StyleRule(
+                    BlockSelector.all,
+                    (doc, docNode) {
+                      return {
+                        Styles.textStyle: TextStyle(
+                          color: Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black,
+                          fontSize: 16,
+                          height: 1.5,
+                        ),
+                        Styles.padding: const CascadingPadding.symmetric(
+                          horizontal: 16,
+                          vertical: 4,
+                        ),
+                      };
+                    },
+                  ),
+                  StyleRule(
+                    const BlockSelector("header1"),
+                    (doc, docNode) {
+                      return {
+                        Styles.textStyle: TextStyle(
+                          color: Theme.of(context).textTheme.headlineLarge?.color ?? Colors.black,
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          height: 1.2,
+                        ),
+                        Styles.padding: const CascadingPadding.only(
+                          left: 16,
+                          right: 16,
+                          top: 24,
+                          bottom: 8,
+                        ),
+                      };
+                    },
+                  ),
+                  StyleRule(
+                    const BlockSelector("header2"),
+                    (doc, docNode) {
+                      return {
+                        Styles.textStyle: TextStyle(
+                          color: Theme.of(context).textTheme.headlineMedium?.color ?? Colors.black,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          height: 1.3,
+                        ),
+                        Styles.padding: const CascadingPadding.only(
+                          left: 16,
+                          right: 16,
+                          top: 16,
+                          bottom: 8,
+                        ),
+                      };
+                    },
+                  ),
+                  StyleRule(
+                    const BlockSelector("header3"),
+                    (doc, docNode) {
+                      return {
+                        Styles.textStyle: TextStyle(
+                          color: Theme.of(context).textTheme.headlineSmall?.color ?? Colors.black,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          height: 1.4,
+                        ),
+                        Styles.padding: const CascadingPadding.only(
+                          left: 16,
+                          right: 16,
+                          top: 12,
+                          bottom: 8,
+                        ),
+                      };
+                    },
+                  ),
+                  StyleRule(
+                    const BlockSelector("paragraph"),
+                    (doc, docNode) {
+                      return {
+                        Styles.textStyle: TextStyle(
+                          color: Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black,
+                          fontSize: 16,
+                          height: 1.5,
+                        ),
+                        Styles.padding: const CascadingPadding.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                      };
+                    },
+                  ),
+                  StyleRule(
+                    const BlockSelector("listItem"),
+                    (doc, docNode) {
+                      return {
+                        Styles.textStyle: TextStyle(
+                          color: Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black,
+                          fontSize: 16,
+                          height: 1.5,
+                        ),
+                        Styles.padding: const CascadingPadding.only(
+                          left: 40,
+                          right: 16,
+                          top: 4,
+                          bottom: 4,
+                        ),
+                      };
+                    },
+                  ),
+                ],
+                inlineTextStyler: (attributions, existingStyle) {
+                  return existingStyle.copyWith(
+                    color: Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black,
+                  );
+                },
+              ),
             ),
           ),
         ),

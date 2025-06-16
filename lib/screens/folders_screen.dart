@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
+import 'dart:async';
 import 'dart:developer' as developer;
 import 'package:path/path.dart' as p;
 
@@ -35,8 +36,12 @@ class _FoldersScreenState extends State<FoldersScreen> {
   
   List<Folder> _folders = [];
   List<Document> _documents = [];
+  List<Folder> _filteredFolders = [];
+  List<Document> _filteredDocuments = [];
   bool _isLoadingFolders = false;
   bool _isLoadingDocuments = false;
+  Timer? _searchDebouncer;
+  bool _isGridView = true; // Add view mode state
   
   // For file upload
   File? _selectedFile;
@@ -49,11 +54,19 @@ class _FoldersScreenState extends State<FoldersScreen> {
   // For document creation
   DocumentType _selectedDocType = DocumentType.pdf;
   
+  // For web platform
+  List<int>? _selectedFileBytes;
+  
   @override
   void initState() {
     super.initState();
     _folderBloc = context.read<FolderBloc>();
     _documentBloc = context.read<DocumentBloc>();
+    
+    // Initialize filtered lists
+    _filteredFolders = _folders;
+    _filteredDocuments = _documents;
+    
     _loadContent();
     _loadFolderPath();
   }
@@ -202,52 +215,86 @@ class _FoldersScreenState extends State<FoldersScreen> {
                         FilePickerResult? result = await FilePicker.platform.pickFiles(
                           type: FileType.custom,
                           allowedExtensions: ['pdf', 'docx', 'csv'],
-                          withData: true, // Ensure we get file data
-                          withReadStream: true, // Enable read stream for large files
+                          withData: true, // Ensure we get file data for web
+                          withReadStream: false, // Disable read stream for web compatibility
                         );
                         
                         if (result != null) {
-                          if (result.files.single.path == null && !kIsWeb) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Error: Could not get file path')),
-                            );
-                            return;
-                          }
+                          // Check if we have a valid file selection
+                          final pickedFile = result.files.single;
                           
-                          setState(() {
-                            if (!kIsWeb && result.files.single.path != null) {
-                              _selectedFile = File(result.files.single.path!);
+                          if (kIsWeb) {
+                            // For web, we need the bytes
+                            if (pickedFile.bytes == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Error: Could not read file data on web')),
+                              );
+                              return;
+                            }
+                            
+                            setState(() {
+                              // For web, we store the bytes and create a virtual file reference
+                              _selectedFile = null; // We don't use File objects on web
+                              _selectedFileBytes = pickedFile.bytes;
+                              _selectedFileName = pickedFile.name;
+                              _documentNameController.text = pickedFile.name;
+                              
+                              // Set document type based on file extension
+                              final extension = p.extension(pickedFile.name).toLowerCase();
+                              developer.log('File extension: $extension', name: 'FoldersScreen');
+                              
+                              if (extension == '.pdf') {
+                                _selectedDocType = DocumentType.pdf;
+                              } else if (extension == '.docx') {
+                                _selectedDocType = DocumentType.docx;
+                              } else if (extension == '.csv') {
+                                _selectedDocType = DocumentType.csv;
+                              } else {
+                                _selectedDocType = DocumentType.pdf;
+                                developer.log('Unknown extension, defaulting to PDF', name: 'FoldersScreen');
+                              }
+                              
+                              developer.log('Web platform: selected file ${pickedFile.name}, size: ${pickedFile.bytes!.length} bytes', name: 'FoldersScreen');
+                            });
+                          } else {
+                            // For non-web platforms, check file path
+                            if (pickedFile.path == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Error: Could not get file path')),
+                              );
+                              return;
+                            }
+                            
+                            setState(() {
+                              _selectedFile = File(pickedFile.path!);
+                              _selectedFileBytes = null;
                               developer.log('Selected file path: ${_selectedFile!.path}', name: 'FoldersScreen');
                               developer.log('File exists: ${_selectedFile!.existsSync()}', name: 'FoldersScreen');
-                            } else if (kIsWeb) {
-                              developer.log('Web platform detected, will use file bytes', name: 'FoldersScreen');
-                              // For web, we would handle this differently - to be implemented
-                            }
-                            
-                            _selectedFileName = result.files.single.name;
-                            _documentNameController.text = result.files.single.name;
-                            
-                            // Set document type based on file extension
-                            final extension = p.extension(result.files.single.name).toLowerCase();
-                            developer.log('File extension: $extension', name: 'FoldersScreen');
-                            
-                            if (extension == '.pdf') {
-                              _selectedDocType = DocumentType.pdf;
-                            } else if (extension == '.docx') {
-                              _selectedDocType = DocumentType.docx;
-                            } else if (extension == '.csv') {
-                              _selectedDocType = DocumentType.csv;
-                            } else {
-                              // Default to PDF if extension not recognized
-                              _selectedDocType = DocumentType.pdf;
-                              developer.log('Unknown extension, defaulting to PDF', name: 'FoldersScreen');
-                            }
-                          });
+                              
+                              _selectedFileName = pickedFile.name;
+                              _documentNameController.text = pickedFile.name;
+                              
+                              // Set document type based on file extension
+                              final extension = p.extension(pickedFile.name).toLowerCase();
+                              developer.log('File extension: $extension', name: 'FoldersScreen');
+                              
+                              if (extension == '.pdf') {
+                                _selectedDocType = DocumentType.pdf;
+                              } else if (extension == '.docx') {
+                                _selectedDocType = DocumentType.docx;
+                              } else if (extension == '.csv') {
+                                _selectedDocType = DocumentType.csv;
+                              } else {
+                                _selectedDocType = DocumentType.pdf;
+                                developer.log('Unknown extension, defaulting to PDF', name: 'FoldersScreen');
+                              }
+                            });
+                          }
                         }
                       } catch (e) {
                         developer.log('Error picking file: $e', name: 'FoldersScreen');
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Error selecting file: $e')),
+                          SnackBar(content: Text('Error picking file: $e')),
                         );
                       }
                     },
@@ -392,27 +439,46 @@ class _FoldersScreenState extends State<FoldersScreen> {
                       // Log start of document creation
                       developer.log('Starting document creation/upload', name: 'FoldersScreen');
                       
-                      if (_selectedFile != null) {
+                      if (_selectedFile != null || _selectedFileBytes != null) {
                         // Option 1: Upload existing file
-                        developer.log(
-                          'Uploading document file: ${_selectedFile!.path}, ' +
-                          'name: ${_documentNameController.text}, ' +
-                          'folderId: ${widget.parentFolderId ?? "root"}', 
-                          name: 'FoldersScreen'
-                        );
-                        
-                        // Check if file exists and is readable
-                        if (!_selectedFile!.existsSync()) {
-                          throw Exception('Selected file does not exist');
+                        if (kIsWeb && _selectedFileBytes != null) {
+                          developer.log(
+                            'Uploading document file bytes on web: ' +
+                            'name: ${_documentNameController.text}, ' +
+                            'size: ${_selectedFileBytes!.length} bytes, ' +
+                            'folderId: ${widget.parentFolderId ?? "root"}', 
+                            name: 'FoldersScreen'
+                          );
+                          
+                          _documentBloc.add(AddDocumentFromBytes(
+                            fileBytes: _selectedFileBytes!,
+                            fileName: _selectedFileName!,
+                            name: _documentNameController.text,
+                            folderId: widget.parentFolderId,
+                          ));
+                        } else if (!kIsWeb && _selectedFile != null) {
+                          developer.log(
+                            'Uploading document file: ${_selectedFile!.path}, ' +
+                            'name: ${_documentNameController.text}, ' +
+                            'folderId: ${widget.parentFolderId ?? "root"}', 
+                            name: 'FoldersScreen'
+                          );
+                          
+                          // Check if file exists and is readable
+                          if (!_selectedFile!.existsSync()) {
+                            throw Exception('Selected file does not exist');
+                          }
+                          
+                          _documentBloc.add(AddDocument(
+                            file: _selectedFile!,
+                            name: _documentNameController.text,
+                            folderId: widget.parentFolderId,
+                          ));
+                        } else {
+                          throw Exception('No valid file selected for current platform');
                         }
                         
-                        _documentBloc.add(AddDocument(
-                          file: _selectedFile!,
-                          name: _documentNameController.text,
-                          folderId: widget.parentFolderId,
-                        ));
-                        
-                        developer.log('AddDocument event dispatched', name: 'FoldersScreen');
+                        developer.log('Document upload event dispatched', name: 'FoldersScreen');
                         Navigator.pop(context);
                       } else {
                         // Option 2: Create new document with proper validation
@@ -556,6 +622,15 @@ class _FoldersScreenState extends State<FoldersScreen> {
             },
           ),
           IconButton(
+            icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
+            onPressed: () {
+              setState(() {
+                _isGridView = !_isGridView;
+              });
+            },
+            tooltip: _isGridView ? 'Switch to List View' : 'Switch to Grid View',
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadContent,
           ),
@@ -580,6 +655,7 @@ class _FoldersScreenState extends State<FoldersScreen> {
                   _folders = state.folders;
                   _isLoadingFolders = false;
                 });
+                _filterContent(_searchController.text);
               }
             },
           ),
@@ -609,6 +685,7 @@ class _FoldersScreenState extends State<FoldersScreen> {
                   _documents = state.documents;
                   _isLoadingDocuments = false;
                 });
+                _filterContent(_searchController.text);
               }
             },
           ),
@@ -616,6 +693,7 @@ class _FoldersScreenState extends State<FoldersScreen> {
         child: Column(
           children: [
             _buildBreadcrumbNavigation(),
+            _buildSearchBar(),
             Expanded(child: _buildRefreshableContent()),
           ],
         ),
@@ -774,6 +852,38 @@ class _FoldersScreenState extends State<FoldersScreen> {
       ),
     );
   }
+
+  Widget _buildSearchBar() {
+    return Container(
+      padding: const EdgeInsets.all(16.0),
+      color: Theme.of(context).colorScheme.surface,
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search folders and documents...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        onPressed: _clearSearch,
+                        icon: const Icon(Icons.clear),
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                filled: true,
+                fillColor: Theme.of(context).colorScheme.background,
+              ),
+              onChanged: _onSearchChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
   
   Widget _buildRefreshableContent() {
     return RefreshIndicator(
@@ -789,7 +899,7 @@ class _FoldersScreenState extends State<FoldersScreen> {
   }
   
   Widget _buildContentView() {
-    if (_folders.isEmpty && _documents.isEmpty) {
+    if (_filteredFolders.isEmpty && _filteredDocuments.isEmpty) {
       return _buildEmptyState();
     }
     
@@ -817,16 +927,20 @@ class _FoldersScreenState extends State<FoldersScreen> {
                   color: Colors.grey[400],
                 ),
                 const SizedBox(height: 16),
-                const Text(
-                  'This folder is empty',
-                  style: TextStyle(
+                Text(
+                  _searchController.text.isNotEmpty 
+                      ? 'No results found' 
+                      : 'This folder is empty',
+                  style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Create new folders or documents!',
+                  _searchController.text.isNotEmpty 
+                      ? 'Try a different search term'
+                      : 'Create new folders or documents!',
                   style: TextStyle(
                     color: Colors.grey[600],
                   ),
@@ -863,128 +977,228 @@ class _FoldersScreenState extends State<FoldersScreen> {
   }
   
   Widget _buildMobileLayout() {
-    return ListView(
-      padding: const EdgeInsets.all(8),
-      children: [
-        if (_folders.isNotEmpty)
-          ...[
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text('Folders', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+    if (_isGridView) {
+      return CustomScrollView(
+        slivers: [
+          if (_filteredFolders.isNotEmpty) ...[
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Folders', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              ),
             ),
-            ..._folders.map((folder) => _buildFolderListItem(folder)).toList(),
-            const Divider(height: 32),
-          ],
-        if (_documents.isNotEmpty)
-          ...[
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text('Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 1.0,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => _buildFolderCard(_filteredFolders[index]),
+                childCount: _filteredFolders.length,
+              ),
             ),
-            ..._documents.map((doc) => _buildDocumentListItem(doc)).toList(),
+            const SliverToBoxAdapter(
+              child: Divider(height: 32),
+            ),
           ],
-      ],
-    );
+          if (_filteredDocuments.isNotEmpty) ...[
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              ),
+            ),
+            SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 1.2,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => _buildDocumentCard(_filteredDocuments[index]),
+                childCount: _filteredDocuments.length,
+              ),
+            ),
+          ],
+        ],
+      );
+    } else {
+      return ListView(
+        padding: const EdgeInsets.all(8),
+        children: [
+          if (_filteredFolders.isNotEmpty)
+            ...[
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text('Folders', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              ),
+              ..._filteredFolders.map((folder) => _buildFolderListItem(folder)).toList(),
+              const Divider(height: 32),
+            ],
+          if (_filteredDocuments.isNotEmpty)
+            ...[
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text('Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              ),
+              ..._filteredDocuments.map((doc) => _buildDocumentListItem(doc)).toList(),
+            ],
+        ],
+      );
+    }
   }
   
   Widget _buildTabletLayout() {
-    return CustomScrollView(
-      slivers: [
-        if (_folders.isNotEmpty) ...[
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Folders', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+    if (_isGridView) {
+      return CustomScrollView(
+        slivers: [
+          if (_filteredFolders.isNotEmpty) ...[
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Folders', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+              ),
             ),
-          ),
-          SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              childAspectRatio: 1.0,
+            SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 1.0,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => _buildFolderCard(_filteredFolders[index]),
+                childCount: _filteredFolders.length,
+              ),
             ),
-            delegate: SliverChildBuilderDelegate(
-              (context, index) => _buildFolderCard(_folders[index]),
-              childCount: _folders.length,
+            const SliverToBoxAdapter(
+              child: Divider(height: 32),
             ),
-          ),
-          const SliverToBoxAdapter(
-            child: Divider(height: 32),
-          ),
+          ],
+          if (_filteredDocuments.isNotEmpty) ...[
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+              ),
+            ),
+            SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 1.5,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => _buildDocumentCard(_filteredDocuments[index]),
+                childCount: _filteredDocuments.length,
+              ),
+            ),
+          ],
         ],
-        if (_documents.isNotEmpty) ...[
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
-            ),
-          ),
-          SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              childAspectRatio: 1.5,
-            ),
-            delegate: SliverChildBuilderDelegate(
-              (context, index) => _buildDocumentCard(_documents[index]),
-              childCount: _documents.length,
-            ),
-          ),
+      );
+    } else {
+      return ListView(
+        padding: const EdgeInsets.all(8),
+        children: [
+          if (_filteredFolders.isNotEmpty)
+            ...[
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text('Folders', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+              ),
+              ..._filteredFolders.map((folder) => _buildFolderListItem(folder)).toList(),
+              const Divider(height: 32),
+            ],
+          if (_filteredDocuments.isNotEmpty)
+            ...[
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text('Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+              ),
+              ..._filteredDocuments.map((doc) => _buildDocumentListItem(doc)).toList(),
+            ],
         ],
-      ],
-    );
+      );
+    }
   }
   
   Widget _buildDesktopLayout() {
-    return CustomScrollView(
-      slivers: [
-        if (_folders.isNotEmpty) ...[
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text('Folders', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24)),
+    if (_isGridView) {
+      return CustomScrollView(
+        slivers: [
+          if (_filteredFolders.isNotEmpty) ...[
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text('Folders', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24)),
+              ),
             ),
-          ),
-          SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 5,
-              crossAxisSpacing: 24,
-              mainAxisSpacing: 24,
-              childAspectRatio: 1.0,
+            SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 5,
+                crossAxisSpacing: 24,
+                mainAxisSpacing: 24,
+                childAspectRatio: 1.0,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => _buildFolderCard(_filteredFolders[index]),
+                childCount: _filteredFolders.length,
+              ),
             ),
-            delegate: SliverChildBuilderDelegate(
-              (context, index) => _buildFolderCard(_folders[index]),
-              childCount: _folders.length,
+            const SliverToBoxAdapter(
+              child: Divider(height: 48),
             ),
-          ),
-          const SliverToBoxAdapter(
-            child: Divider(height: 48),
-          ),
+          ],
+          if (_filteredDocuments.isNotEmpty) ...[
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text('Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24)),
+              ),
+            ),
+            SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 5,
+                crossAxisSpacing: 24,
+                mainAxisSpacing: 24,
+                childAspectRatio: 1.5,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => _buildDocumentCard(_filteredDocuments[index]),
+                childCount: _filteredDocuments.length,
+              ),
+            ),
+          ],
         ],
-        if (_documents.isNotEmpty) ...[
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text('Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24)),
-            ),
-          ),
-          SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 5,
-              crossAxisSpacing: 24,
-              mainAxisSpacing: 24,
-              childAspectRatio: 1.5,
-            ),
-            delegate: SliverChildBuilderDelegate(
-              (context, index) => _buildDocumentCard(_documents[index]),
-              childCount: _documents.length,
-            ),
-          ),
+      );
+    } else {
+      return ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          if (_filteredFolders.isNotEmpty)
+            ...[
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text('Folders', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24)),
+              ),
+              ..._filteredFolders.map((folder) => _buildFolderListItem(folder)).toList(),
+              const Divider(height: 48),
+            ],
+          if (_filteredDocuments.isNotEmpty)
+            ...[
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text('Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24)),
+              ),
+              ..._filteredDocuments.map((doc) => _buildDocumentListItem(doc)).toList(),
+            ],
         ],
-      ],
-    );
+      );
+    }
   }
   
   Widget _buildFolderCard(Folder folder) {
@@ -1228,11 +1442,42 @@ class _FoldersScreenState extends State<FoldersScreen> {
     );
   }
   
+  void _onSearchChanged(String query) {
+    _searchDebouncer?.cancel();
+    _searchDebouncer = Timer(const Duration(milliseconds: 300), () {
+      _filterContent(query);
+    });
+  }
+
+  void _filterContent(String query) {
+    setState(() {
+      if (query.isEmpty) {
+        _filteredFolders = _folders;
+        _filteredDocuments = _documents;
+      } else {
+        final queryLower = query.toLowerCase();
+        _filteredFolders = _folders.where((folder) {
+          return folder.name.toLowerCase().contains(queryLower);
+        }).toList();
+        
+        _filteredDocuments = _documents.where((document) {
+          return document.name.toLowerCase().contains(queryLower);
+        }).toList();
+      }
+    });
+  }
+
+  void _clearSearch() {
+    _searchController.clear();
+    _filterContent('');
+  }
+
   @override
   void dispose() {
     _folderNameController.dispose();
     _documentNameController.dispose();
     _searchController.dispose();
+    _searchDebouncer?.cancel();
     super.dispose();
   }
 }

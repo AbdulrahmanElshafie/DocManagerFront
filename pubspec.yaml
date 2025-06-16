@@ -78,6 +78,7 @@ dependencies:
   # Document conversion
   html: ^0.15.4
   markdown: ^7.1.1
+  web_socket_channel: ^2.4.0
   
   # Provider
   provider: ^6.0.5

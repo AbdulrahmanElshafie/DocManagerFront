@@ -3,7 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:doc_manager/models/document.dart';
 import 'package:doc_manager/blocs/document/document_bloc.dart';
 import 'package:doc_manager/blocs/document/document_event.dart';
-import 'package:doc_manager/screens/permissions_screen.dart';
 import 'package:doc_manager/screens/shareable_links_screen.dart';
 import 'dart:io';
 import 'package:share_plus/share_plus.dart';
@@ -73,14 +72,6 @@ class DocumentActions extends StatelessWidget {
                 label: 'Download Document',
                 onPressed: () => _downloadDocument(context),
               ),
-            
-            // Permissions button
-            _buildActionButton(
-              context,
-              icon: Icons.security,
-              label: 'Manage Permissions',
-              onPressed: () => _navigateToPermissions(context),
-            ),
             
             // Shareable links button
             _buildActionButton(
@@ -188,14 +179,7 @@ class DocumentActions extends StatelessWidget {
     }
   }
   
-  void _navigateToPermissions(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => PermissionsScreen(documentId: document.id),
-      ),
-    );
-  }
+
   
   void _navigateToShareableLinks(BuildContext context) {
     Navigator.push(

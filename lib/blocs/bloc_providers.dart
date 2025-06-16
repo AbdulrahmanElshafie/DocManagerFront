@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:provider/provider.dart';
 import 'package:provider/single_child_widget.dart';
@@ -7,21 +6,19 @@ import 'package:provider/single_child_widget.dart';
 import 'package:doc_manager/repository/document_repository.dart';
 import 'package:doc_manager/repository/user_repository.dart';
 import 'package:doc_manager/repository/folder_repository.dart';
-import 'package:doc_manager/repository/permission_repository.dart';
 import 'package:doc_manager/repository/version_repository.dart';
 import 'package:doc_manager/repository/comment_repository.dart';
 import 'package:doc_manager/repository/shareable_link_repository.dart';
-import 'package:doc_manager/repository/backup_repository.dart';
+import 'package:doc_manager/repository/activity_log_repository.dart';
 
 // Import blocs
 import 'package:doc_manager/blocs/document/document_bloc.dart';
 import 'package:doc_manager/blocs/user/user_bloc.dart';
 import 'package:doc_manager/blocs/folder/folder_bloc.dart';
-import 'package:doc_manager/blocs/permission/permission_bloc.dart';
 import 'package:doc_manager/blocs/version/version_bloc.dart';
 import 'package:doc_manager/blocs/comment/comment_bloc.dart';
 import 'package:doc_manager/blocs/shareable_link/shareable_link_bloc.dart';
-import 'package:doc_manager/blocs/backup/backup_bloc.dart';
+import 'package:doc_manager/blocs/activity_log/activity_log_bloc.dart';
 
 class AppBlocProviders {
   static List<SingleChildWidget> get repositoryProviders {
@@ -35,9 +32,6 @@ class AppBlocProviders {
       Provider<FolderRepository>(
         create: (_) => FolderRepository(),
       ),
-      Provider<PermissionRepository>(
-        create: (_) => PermissionRepository(),
-      ),
       Provider<VersionRepository>(
         create: (_) => VersionRepository(),
       ),
@@ -47,8 +41,8 @@ class AppBlocProviders {
       Provider<ShareableLinkRepository>(
         create: (_) => ShareableLinkRepository(),
       ),
-      Provider<BackupRepository>(
-        create: (_) => BackupRepository(),
+      Provider<ActivityLogRepository>(
+        create: (_) => ActivityLogRepository(),
       ),
     ];
   }
@@ -70,11 +64,6 @@ class AppBlocProviders {
           folderRepository: context.read<FolderRepository>(),
         ),
       ),
-      BlocProvider<PermissionBloc>(
-        create: (context) => PermissionBloc(
-          permissionRepository: context.read<PermissionRepository>(),
-        ),
-      ),
       BlocProvider<VersionBloc>(
         create: (context) => VersionBloc(
           versionRepository: context.read<VersionRepository>(),
@@ -90,9 +79,9 @@ class AppBlocProviders {
           shareableLinkRepository: context.read<ShareableLinkRepository>(),
         ),
       ),
-      BlocProvider<BackupBloc>(
-        create: (context) => BackupBloc(
-          backupRepository: context.read<BackupRepository>(),
+      BlocProvider<ActivityLogBloc>(
+        create: (context) => ActivityLogBloc(
+          activityLogRepository: context.read<ActivityLogRepository>(),
         ),
       ),
     ];

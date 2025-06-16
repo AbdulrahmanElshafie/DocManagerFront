@@ -1,23 +1,26 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as path;
 
+import '../models/document.dart';
+import '../models/folder.dart';
 import '../blocs/document/document_bloc.dart';
 import '../blocs/document/document_event.dart';
 import '../blocs/document/document_state.dart';
 import '../blocs/folder/folder_bloc.dart';
 import '../blocs/folder/folder_event.dart';
 import '../blocs/folder/folder_state.dart';
-import '../models/document.dart';
-import '../models/folder.dart';
 import '../widgets/file_editor.dart';
 import '../widgets/document_actions.dart';
 import '../widgets/metadata_section.dart';
 import '../widgets/versions_section.dart';
 import '../widgets/comments_section.dart';
 import '../shared/components/responsive_builder.dart';
+import '../shared/network/api_service.dart';
+import '../shared/utils/logger.dart';
 
 class DocumentsScreen extends StatefulWidget {
   final String? folderId;
@@ -34,12 +37,19 @@ class DocumentsScreen extends StatefulWidget {
 }
 
 class _DocumentsScreenState extends State<DocumentsScreen> {
+  final ApiService _apiService = ApiService();
   final TextEditingController _searchController = TextEditingController();
   String? _selectedFolderId;
   Document? _selectedDocument;
   bool _showCreateDialog = false;
   String _viewMode = 'grid'; // 'grid' or 'list'
   String _sortBy = 'name'; // 'name', 'date', 'type'
+  Timer? _searchDebouncer;
+
+  List<Document> _documents = [];
+  List<Document> _filteredDocuments = [];
+  bool _isLoading = false;
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -47,11 +57,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     _selectedFolderId = widget.folderId;
     _searchController.text = widget.initialQuery ?? '';
     
+    // Initialize filtered documents
+    _filteredDocuments = _documents;
+    
     // Load initial data
-    context.read<DocumentBloc>().add(LoadDocuments(
-      folderId: _selectedFolderId,
-      query: widget.initialQuery,
-    ));
+    _loadDocuments();
     
     // Load folders for folder selector
     context.read<FolderBloc>().add(const LoadFolders());
@@ -60,6 +70,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _searchDebouncer?.cancel();
     super.dispose();
   }
 
@@ -361,7 +372,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           if (state is DocumentsLoading) {
             return const Center(child: CircularProgressIndicator());
           } else if (state is DocumentsLoaded) {
-            final sortedDocuments = _sortDocuments(state.documents);
+            final sortedDocuments = _sortDocuments(_filteredDocuments);
             
             if (sortedDocuments.isEmpty) {
               return _buildEmptyState();
@@ -572,25 +583,30 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            'No documents found',
+            _searchController.text.isNotEmpty 
+                ? 'No documents found' 
+                : 'No documents in this folder',
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
               color: Colors.grey[600],
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            'Upload a document or create a new one to get started',
+            _searchController.text.isNotEmpty 
+                ? 'Try a different search term'
+                : 'Upload a document or create a new one to get started',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: Colors.grey[600],
             ),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: _showFileUploadOptions,
-            icon: const Icon(Icons.upload_file),
-            label: const Text('Upload Document'),
-          ),
+          if (_searchController.text.isEmpty)
+            ElevatedButton.icon(
+              onPressed: _showFileUploadOptions,
+              icon: const Icon(Icons.upload_file),
+              label: const Text('Upload Document'),
+            ),
         ],
       ),
     );
@@ -644,21 +660,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           document: document,
           onSave: (content, type) {
             // Handle save operation
-            context.read<DocumentBloc>().add(UpdateDocument(
-              id: document.id,
-              content: content,
-              name: document.name,
-              folderId: document.folderId,
-            ));
+            _apiService.updateDocument(
+              document.id,
+              content,
+              document.name,
+              document.folderId,
+            );
           },
           onSaveFile: (file) {
             // Handle file save operation
-            context.read<DocumentBloc>().add(UpdateDocument(
-              id: document.id,
-              file: file,
-              name: document.name,
-              folderId: document.folderId,
-            ));
+            _apiService.updateDocument(
+              document.id,
+              file.readAsStringSync(),
+              document.name,
+              document.folderId,
+            );
           },
         ),
       ),
@@ -696,10 +712,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              context.read<DocumentBloc>().add(DeleteDocument(
-                document.id,
-                folderId: _selectedFolderId,
-              ));
+              _apiService.deleteDocument(document.id, document.folderId);
               if (_selectedDocument?.id == document.id) {
                 setState(() {
                   _selectedDocument = null;
@@ -767,11 +780,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         final file = File(result.files.single.path!);
         final fileName = result.files.single.name;
 
-        context.read<DocumentBloc>().add(AddDocument(
-          folderId: _selectedFolderId,
-          file: file,
-          name: fileName,
-        ));
+        _apiService.addDocument(
+          _selectedFolderId,
+          file,
+          fileName,
+        );
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -783,24 +796,68 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
   }
 
-  void _loadDocuments() {
-    context.read<DocumentBloc>().add(LoadDocuments(
-      folderId: _selectedFolderId,
-      query: _searchController.text.isNotEmpty ? _searchController.text : null,
-    ));
+  Future<void> _loadDocuments() async {
+    try {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+
+      Map<String, dynamic> params = {};
+      
+      // Add folder filter if specified
+      if (_selectedFolderId != null) {
+        params['folder'] = _selectedFolderId!;
+      }
+      
+      final response = await _apiService.getList('/manager/document/', params);
+      
+      List<Document> documents = response.map((doc) => Document.fromJson(doc)).toList();
+      
+      setState(() {
+        _documents = documents;
+        _isLoading = false;
+      });
+      
+      // Apply current search filter
+      _filterDocuments(_searchController.text);
+    } catch (e) {
+      LoggerUtil.error('Error loading documents: $e');
+      setState(() {
+        _errorMessage = e.toString();
+        _isLoading = false;
+      });
+    }
   }
 
   void _onSearchChanged(String query) {
-    // Implement debounced search
+    _searchDebouncer?.cancel();
+    _searchDebouncer = Timer(const Duration(milliseconds: 300), () {
+      _filterDocuments(query);
+    });
   }
 
   void _onSearchSubmitted(String query) {
-    _loadDocuments();
+    _searchDebouncer?.cancel();
+    _filterDocuments(query);
   }
 
   void _clearSearch() {
     _searchController.clear();
-    _loadDocuments();
+    _filterDocuments('');
+  }
+
+  void _filterDocuments(String query) {
+    setState(() {
+      if (query.isEmpty) {
+        _filteredDocuments = _documents;
+      } else {
+        final queryLower = query.toLowerCase();
+        _filteredDocuments = _documents.where((document) {
+          return document.name.toLowerCase().contains(queryLower);
+        }).toList();
+      }
+    });
   }
 
   void _toggleViewMode() {
@@ -933,6 +990,7 @@ class _CreateDocumentDialog extends StatefulWidget {
 
 class _CreateDocumentDialogState extends State<_CreateDocumentDialog> {
   final TextEditingController _nameController = TextEditingController();
+  final ApiService _apiService = ApiService();
   DocumentType _selectedType = DocumentType.pdf;
   bool _isCreating = false;
 
@@ -1035,11 +1093,11 @@ class _CreateDocumentDialogState extends State<_CreateDocumentDialog> {
       // Create initial content based on type
       String initialContent = _getInitialContent(_selectedType);
 
-      context.read<DocumentBloc>().add(CreateDocument(
-        name: fileName,
-        folderId: widget.folderId,
-        content: initialContent,
-      ));
+      _apiService.addDocument(
+        widget.folderId,
+        File(initialContent),
+        fileName,
+      );
 
       Navigator.pop(context);
       widget.onDocumentCreated();

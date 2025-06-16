@@ -75,8 +75,8 @@ class Folder extends Equatable {
     return Folder(
       id: json['id'] ?? '',
       name: json['name'] ?? '',
-      parentId: json['parent'],
-      ownerId: json['owner'] ?? '',
+      parentId: json['parent']?.toString(),
+      ownerId: json['owner']?.toString() ?? '',
       createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
       lastModified: json['updated_at'] != null ? DateTime.parse(json['updated_at']) : DateTime.now(),
       documentIds: documentIds,
@@ -114,6 +114,20 @@ class Folder extends Equatable {
       lastModified: lastModified ?? this.lastModified,
       documentIds: documentIds ?? this.documentIds,
       folderIds: folderIds ?? this.folderIds
+    );
+  }
+
+  // Factory method to create an empty folder
+  factory Folder.empty() {
+    return Folder(
+      id: '',
+      name: '',
+      parentId: null,
+      ownerId: '',
+      createdAt: DateTime.now(),
+      lastModified: DateTime.now(),
+      documentIds: [],
+      folderIds: [],
     );
   }
 

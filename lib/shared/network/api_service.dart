@@ -11,6 +11,9 @@ import 'dart:developer' as developer;
 
 class ApiService {
   final SecureStorageService _secureStorage = SecureStorageService();
+  
+  // Maximum timeout for sending requests
+  static const timeout = Duration(minutes: 2);
 
   Future<Map<String, String>> _getHeaders({bool isMultipart = false}) async {
     final token = await _secureStorage.readSecureData('authToken');
@@ -136,44 +139,30 @@ class ApiService {
       String endpoint, 
       File file, 
       Map<String, String> fields) async {
+    final url = '${API.baseUrl}$endpoint';
+    final headers = await _getHeaders(isMultipart: true);
+    
+    developer.log('UPLOAD FILE REQUEST: $url', name: 'ApiService');
+    developer.log('UPLOAD FILE FIELDS: $fields', name: 'ApiService');
+    
+    // Create multipart request
+    final request = http.MultipartRequest('POST', Uri.parse(url));
+    request.headers.addAll(headers);
+    
+    // Add text fields
+    request.fields.addAll(fields);
+    
+    // Add file - handle differently for web vs other platforms
+    final filename = basename(file.path);
+    final mimeType = _getMimeType(filename);
+    
     try {
-      final url = '${API.baseUrl}$endpoint';
-      final headers = await _getHeaders(isMultipart: true);
-      
-      developer.log('UPLOAD FILE REQUEST: $url', name: 'ApiService');
-      developer.log('UPLOAD FILE FIELDS: $fields', name: 'ApiService');
-      developer.log('FILE EXISTS: ${file.existsSync()}', name: 'ApiService');
-      developer.log('FILE PATH: ${file.path}', name: 'ApiService');
-      
-      if (!file.existsSync()) {
-        throw Exception('File does not exist: ${file.path}');
-      }
-      
-      // Create multipart request
-      final request = http.MultipartRequest('POST', Uri.parse(url));
-      request.headers.addAll(headers);
-      
-      // Add text fields
-      request.fields.addAll(fields);
-      
-      // Add file
-      final filename = basename(file.path);
-      final mimeType = _getMimeType(filename);
-      
-      // Get file size for logging
-      final fileSize = await file.length();
-      developer.log('UPLOADING FILE: $filename (${fileSize / 1024} KB) with mime type: ${mimeType.mimeType}', 
-                    name: 'ApiService');
-      
-      // Maximum timeout for sending request
-      const timeout = Duration(minutes: 2);
-      
-      try {
-        // Create file multipart
-        final fileBytes = await file.readAsBytes();
+      // For all platforms, try to read as bytes first
+      if (kIsWeb || await file.exists()) {
+        final bytes = await file.readAsBytes();
         final multipartFile = http.MultipartFile.fromBytes(
-          'file', 
-          fileBytes,
+          'file',
+          bytes,
           filename: filename,
           contentType: mimeType,
         );
@@ -183,9 +172,9 @@ class ApiService {
                       
         // Add to request
         request.files.add(multipartFile);
-      } catch (e) {
+      } else {
         // Fallback to path-based file upload if reading bytes fails
-        developer.log('Error reading file as bytes, falling back to path-based upload: $e', 
+        developer.log('Error reading file as bytes, falling back to path-based upload', 
                       name: 'ApiService');
         
         request.files.add(
@@ -238,8 +227,7 @@ class ApiService {
           final response = await post(endpoint, {
             'name': fields['name'],
             'folder': fields['folder'],
-            'content': fileContent,
-            'type': fileType
+            'document_type': fileType
           }, {});
           
           return response;
@@ -251,6 +239,63 @@ class ApiService {
       } else {
         rethrow;
       }
+    }
+  }
+
+  // New method specifically for web file uploads using bytes
+  Future<Map<String, dynamic>> uploadFileFromBytes(
+      String endpoint,
+      List<int> bytes,
+      String filename,
+      Map<String, String> fields) async {
+    final url = '${API.baseUrl}$endpoint';
+    final headers = await _getHeaders(isMultipart: true);
+    
+    developer.log('UPLOAD FILE FROM BYTES REQUEST: $url', name: 'ApiService');
+    developer.log('UPLOAD FILE FIELDS: $fields', name: 'ApiService');
+    
+    // Create multipart request
+    final request = http.MultipartRequest('POST', Uri.parse(url));
+    request.headers.addAll(headers);
+    
+    // Add text fields
+    request.fields.addAll(fields);
+    
+    // Add file as bytes
+    final mimeType = _getMimeType(filename);
+    
+    final multipartFile = http.MultipartFile.fromBytes(
+      'file',
+      bytes,
+      filename: filename,
+      contentType: mimeType,
+    );
+    
+    request.files.add(multipartFile);
+    
+    developer.log('CREATED MULTIPART FILE FROM BYTES: ${multipartFile.filename} (${multipartFile.length} bytes)', 
+                  name: 'ApiService');
+    
+    // Send request with timeout
+    developer.log('SENDING MULTIPART REQUEST', name: 'ApiService');
+    final streamedResponse = await request.send().timeout(timeout);
+    developer.log('GOT RESPONSE STATUS: ${streamedResponse.statusCode}', name: 'ApiService');
+    
+    final response = await http.Response.fromStream(streamedResponse);
+    
+    developer.log('UPLOAD FILE FROM BYTES RESPONSE (${response.statusCode}): ${response.body}', name: 'ApiService');
+    
+    if (response.statusCode == 201 || response.statusCode == 200) {
+      try {
+        final jsonResponse = json.decode(response.body);
+        return jsonResponse;
+      } catch (e) {
+        developer.log('Error decoding JSON response: $e', name: 'ApiService');
+        return {};
+      }
+    } else {
+      developer.log('UPLOAD ERROR: Status code ${response.statusCode}', name: 'ApiService');
+      throw Exception('Failed to upload file: ${response.statusCode} - ${response.body}');
     }
   }
   
@@ -406,6 +451,100 @@ class ApiService {
       }
     } else {
       throw Exception('Failed to load list: ${response.statusCode}');
+    }
+  }
+
+  Future<void> updateDocument(String id, String content, String name, String? folderId) async {
+    try {
+      await put('/manager/document/$id/', {
+        'name': name,
+        'folder': folderId,
+        'content': content,
+      }, id);
+    } catch (e) {
+      throw Exception('Failed to update document: $e');
+    }
+  }
+
+  Future<void> deleteDocument(String id, String? folderId) async {
+    try {
+      await delete('/manager/document/', id);
+    } catch (e) {
+      throw Exception('Failed to delete document: $e');
+    }
+  }
+
+  Future<void> addDocument(String? folderId, dynamic file, String name) async {
+    try {
+      final data = <String, dynamic>{
+        'name': name,
+      };
+      if (folderId != null) {
+        data['folder'] = folderId;
+      }
+
+      await post('/manager/document/', data, {});
+    } catch (e) {
+      throw Exception('Failed to add document: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> updateDocumentContent(String documentId, String content, String contentType) async {
+    final headers = await _getHeaders();
+    final url = '${API.baseUrl}/manager/document/$documentId/content/';
+    
+    developer.log('UPDATE CONTENT REQUEST: $url', name: 'ApiService');
+    developer.log('UPDATE CONTENT DATA: content length: ${content.length}, type: $contentType', name: 'ApiService');
+    
+    final response = await http.put(
+      Uri.parse(url),
+      headers: headers,
+      body: json.encode({
+        'content': content,
+        'content_type': contentType,
+      }),
+    );
+    
+    developer.log('UPDATE CONTENT RESPONSE (${response.statusCode}): ${response.body}', name: 'ApiService');
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
+      throw Exception('Failed to update document content: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getDocumentContent(String documentId, String format) async {
+    final headers = await _getHeaders();
+    final url = '${API.baseUrl}/manager/document/$documentId/content/?format=$format';
+    
+    developer.log('GET CONTENT REQUEST: $url', name: 'ApiService');
+    
+    final response = await http.get(
+      Uri.parse(url),
+      headers: headers,
+    );
+    
+    developer.log('GET CONTENT RESPONSE (${response.statusCode}): ${response.body}', name: 'ApiService');
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
+      throw Exception('Failed to get document content: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  Future<List<int>> downloadFile(String url) async {
+    developer.log('DOWNLOAD FILE REQUEST: $url', name: 'ApiService');
+    
+    final response = await http.get(Uri.parse(url));
+    
+    developer.log('DOWNLOAD FILE RESPONSE (${response.statusCode}): ${response.bodyBytes.length} bytes', name: 'ApiService');
+
+    if (response.statusCode == 200) {
+      return response.bodyBytes;
+    } else {
+      throw Exception('Failed to download file: ${response.statusCode}');
     }
   }
 }

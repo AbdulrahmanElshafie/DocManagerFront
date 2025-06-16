@@ -14,6 +14,7 @@ class DocumentBloc extends Bloc<DocumentEvent, DocumentState> {
     on<LoadDocuments>(_onLoadDocuments);
     on<LoadDocument>(_onLoadDocument);
     on<AddDocument>(_onAddDocument);
+    on<AddDocumentFromBytes>(_onAddDocumentFromBytes);
     on<CreateDocument>(_onCreateDocument);
     on<UpdateDocument>(_onUpdateDocument);
     on<DeleteDocument>(_onDeleteDocument);
@@ -88,6 +89,30 @@ class DocumentBloc extends Bloc<DocumentEvent, DocumentState> {
       emit(const DocumentOperationSuccess('Document created successfully'));
     } catch (error) {
       LoggerUtil.error('Failed to create document: $error');
+      emit(DocumentError('Failed to create document: $error'));
+    }
+  }
+
+  Future<void> _onAddDocumentFromBytes(AddDocumentFromBytes event, Emitter<DocumentState> emit) async {
+    try {
+      emit(const DocumentsLoading());
+      final document = await _documentRepository.createDocumentFromBytes(
+        event.folderId ?? '', 
+        event.fileBytes,
+        event.fileName,
+        event.name
+      );
+      
+      // Re-fetch the documents to update the list
+      final documents = await _documentRepository.getDocuments(
+        folderId: event.folderId
+      );
+      
+      emit(DocumentCreated(document));
+      emit(DocumentsLoaded(documents));
+      emit(const DocumentOperationSuccess('Document created successfully'));
+    } catch (error) {
+      LoggerUtil.error('Failed to create document from bytes: $error');
       emit(DocumentError('Failed to create document: $error'));
     }
   }

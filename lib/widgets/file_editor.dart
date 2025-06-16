@@ -13,6 +13,7 @@ import '../shared/network/api_service.dart';
 import 'super_editor_widget.dart';
 import 'improved_pdf_viewer.dart';
 import 'improved_csv_editor.dart';
+import 'version_management_widget.dart';
 
 class FileEditor extends StatefulWidget {
   final Document? document;
@@ -32,7 +33,7 @@ class FileEditor extends StatefulWidget {
   State<FileEditor> createState() => _FileEditorState();
 }
 
-class _FileEditorState extends State<FileEditor> {
+class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
   DocumentType? _fileType;
   String? _fileName;
   File? _currentFile;
@@ -42,6 +43,8 @@ class _FileEditorState extends State<FileEditor> {
   String? _errorMessage;
   Uint8List? _fileBytes; // For web or downloaded remote files
   
+  late TabController _tabController;
+
   // Content data
   String? _documentContent;
   String? _csvContent;
@@ -52,7 +55,14 @@ class _FileEditorState extends State<FileEditor> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _initializeEditor();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   bool _isUrl(String? path) {
@@ -108,11 +118,6 @@ class _FileEditorState extends State<FileEditor> {
         _fileType = _inferFileType(_fileName!);
       } else {
         throw Exception('No document or file provided');
-      }
-
-      // For local files, check if they exist
-      if (!_isRemoteFile && (_currentFile == null || !_currentFile!.existsSync())) {
-        throw Exception('Local file does not exist: ${_currentFile?.path}');
       }
 
       await _loadFileContent();
@@ -194,7 +199,24 @@ class _FileEditorState extends State<FileEditor> {
     try {
       String csvText;
       
-      if (_isRemoteFile && _fileBytes != null) {
+      if (widget.document != null) {
+        // Get CSV content from API
+        try {
+          final response = await _apiService.get(
+            '/manager/document/${widget.document!.id}/content/',
+            {},
+          );
+          
+          csvText = response['content'] ?? '';
+          if (csvText.isEmpty) {
+            // Create empty CSV content if none exists
+            csvText = 'Column A,Column B,Column C\nValue 1,Value 2,Value 3\n';
+          }
+        } catch (e) {
+          LoggerUtil.warning('Could not load CSV from API, creating empty CSV: $e');
+          csvText = 'Column A,Column B,Column C\nValue 1,Value 2,Value 3\n';
+        }
+      } else if (_isRemoteFile && _fileBytes != null) {
         csvText = utf8.decode(_fileBytes!);
       } else if (_currentFile != null) {
         csvText = await _currentFile!.readAsString();
@@ -216,14 +238,21 @@ class _FileEditorState extends State<FileEditor> {
   Future<void> _loadPDFContent() async {
     try {
       if (_isRemoteFile) {
-        // For remote files, we'll use the URL directly in the PDF viewer
-        LoggerUtil.info('PDF will be loaded from URL: $_fileUrl');
+        // For remote files, download the bytes if not already downloaded
+        if (_fileBytes == null && _fileUrl != null) {
+          _fileBytes = await _downloadRemoteFile(_fileUrl!);
+        }
+        LoggerUtil.info('PDF loaded from remote URL, size: ${_fileBytes?.length ?? 0} bytes');
       } else if (_currentFile != null) {
         // For local files, read as bytes
         _fileBytes = await _currentFile!.readAsBytes();
         LoggerUtil.info('PDF loaded from local file, size: ${_fileBytes!.length} bytes');
       } else {
         throw Exception('No PDF data available');
+      }
+      
+      if (_fileBytes == null || _fileBytes!.isEmpty) {
+        throw Exception('PDF file is empty or could not be loaded');
       }
     } catch (e) {
       LoggerUtil.error('Error loading PDF content: $e');
@@ -234,23 +263,32 @@ class _FileEditorState extends State<FileEditor> {
   Future<void> _loadDOCXContent() async {
     try {
       if (widget.document != null) {
-        // Get document content from API
-        final response = await _apiService.get(
-          '/manager/document/${widget.document!.id}/content/',
-          {'format': 'html'},
-        );
-        
-        setState(() {
-          _documentContent = response['content'];
-        });
-        
-        LoggerUtil.info('DOCX content loaded as HTML from API');
+        // Get document content from API as HTML for Super Editor
+        try {
+          final response = await _apiService.get(
+            '/manager/document/${widget.document!.id}/content/',
+            {'format': 'html'},
+          );
+          
+          setState(() {
+            _documentContent = response['content'] ?? '<p>Start typing your document...</p>';
+          });
+          
+          LoggerUtil.info('DOCX content loaded as HTML from API');
+        } catch (e) {
+          LoggerUtil.warning('Could not load DOCX from API, creating empty content: $e');
+          setState(() {
+            _documentContent = '<p>Start typing your document...</p>';
+          });
+        }
       } else {
         throw Exception('Document API access not available for local files');
       }
     } catch (e) {
       LoggerUtil.error('Error loading DOCX content: $e');
-      rethrow;
+      setState(() {
+        _documentContent = '<p>Error loading document. Start typing your document...</p>';
+      });
     }
   }
 
@@ -261,13 +299,10 @@ class _FileEditorState extends State<FileEditor> {
     }
 
     try {
-      await _apiService.put(
-        '/manager/document/${widget.document!.id}/content/',
-        {
-          'content': content,
-          'content_type': contentType,
-        },
-        widget.document!.id.toString(),
+      await _apiService.updateDocumentContent(
+        widget.document!.id,
+        content,
+        contentType,
       );
 
       if (mounted) {
@@ -298,13 +333,10 @@ class _FileEditorState extends State<FileEditor> {
 
       if (widget.document != null) {
         // Save via API
-        await _apiService.put(
-          '/manager/document/${widget.document!.id}/content/',
-          {
-            'content': csvContent,
-            'content_type': 'csv',
-          },
-          widget.document!.id.toString(),
+        await _apiService.updateDocumentContent(
+          widget.document!.id,
+          csvContent,
+          'csv',
         );
       } else if (_currentFile != null) {
         // Save to local file
@@ -370,6 +402,21 @@ class _FileEditorState extends State<FileEditor> {
     }
   }
 
+  Widget _buildTabContent() {
+    return TabBarView(
+      controller: _tabController,
+      children: [
+        // Editor Tab
+        _buildEditor(),
+        
+        // Version Management Tab
+        widget.document != null 
+          ? VersionManagementWidget(document: widget.document!)
+          : const Center(child: Text('Version management not available for local files')),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -413,6 +460,15 @@ class _FileEditorState extends State<FileEditor> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_fileName ?? 'File Editor'),
+        bottom: widget.document != null 
+          ? TabBar(
+              controller: _tabController,
+              tabs: const [
+                Tab(icon: Icon(Icons.edit), text: 'Editor'),
+                Tab(icon: Icon(Icons.history), text: 'Versions'),
+              ],
+            )
+          : null,
         actions: [
           if (_fileType == DocumentType.pdf || _fileType == DocumentType.csv)
             PopupMenuButton<String>(
@@ -438,7 +494,7 @@ class _FileEditorState extends State<FileEditor> {
             ),
         ],
       ),
-      body: _buildEditor(),
+      body: widget.document != null ? _buildTabContent() : _buildEditor(),
     );
   }
 } 

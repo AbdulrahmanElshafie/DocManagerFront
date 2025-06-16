@@ -1,22 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import '../models/document.dart';
-import '../models/version.dart';
-import '../blocs/version/version_bloc.dart';
-import '../blocs/version/version_event.dart';
-import '../blocs/version/version_state.dart';
-import '../blocs/document/document_bloc.dart';
-import '../blocs/document/document_event.dart';
 import '../shared/utils/logger.dart';
+import '../shared/network/api_service.dart';
 
 class VersionManagementWidget extends StatefulWidget {
   final Document document;
-  final VoidCallback? onVersionRestored;
 
   const VersionManagementWidget({
     super.key,
     required this.document,
-    this.onVersionRestored,
   });
 
   @override
@@ -24,56 +16,125 @@ class VersionManagementWidget extends StatefulWidget {
 }
 
 class _VersionManagementWidgetState extends State<VersionManagementWidget> {
+  final ApiService _apiService = ApiService();
+  List<DocumentVersion> _versions = [];
+  bool _isLoading = false;
+
   @override
   void initState() {
     super.initState();
     _loadVersions();
   }
 
-  void _loadVersions() {
-    context.read<VersionBloc>().add(LoadVersions(widget.document.id));
+  Future<void> _loadVersions() async {
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+
+      final response = await _apiService.get(
+        '/manager/document/revision/${widget.document.id}/',
+        {},
+      );
+
+      setState(() {
+        _versions = (response as List)
+            .map((v) => DocumentVersion.fromJson(v))
+            .toList();
+      });
+    } catch (e) {
+      LoggerUtil.error('Error loading versions: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading versions: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
-  void _restoreVersion(Version version) {
+  Future<void> _restoreVersion(DocumentVersion version) async {
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+
+      await _apiService.post(
+        '/manager/document/revision/${widget.document.id}/${version.id}/',
+        {},
+        {'doc_id': widget.document.id, 'version_id': version.id},
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Version restored successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context, true); // Return true to indicate refresh needed
+      }
+    } catch (e) {
+      LoggerUtil.error('Error restoring version: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error restoring version: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _viewVersion(DocumentVersion version) async {
+    try {
+      final response = await _apiService.get(
+        '/manager/document/revision/${widget.document.id}/${version.id}/',
+        {'doc_id': widget.document.id, 'version_id': version.id},
+      );
+
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => VersionViewDialog(
+            version: version,
+            document: Document.fromJson(response),
+          ),
+        );
+      }
+    } catch (e) {
+      LoggerUtil.error('Error viewing version: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error viewing version: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showRestoreConfirmDialog(DocumentVersion version) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Restore Version'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Are you sure you want to restore this version?'),
-            const SizedBox(height: 16),
-            Text('Version: ${version.versionNumber}'),
-            Text('Created: ${_formatDate(version.createdAt)}'),
-            Text('Modified by: ${version.modifiedBy}'),
-            if (version.comment?.isNotEmpty == true) ...[
-              const SizedBox(height: 8),
-              Text('Comment: ${version.comment}'),
-            ],
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange.shade100,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.shade300),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.warning, color: Colors.orange),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'This will replace the current document content with the selected version.',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+        content: Text(
+          'Are you sure you want to restore this version?\n\n'
+          'Created: ${_formatDate(version.createdAt)}\n'
+          'This will create a new version with the restored content.',
         ),
         actions: [
           TextButton(
@@ -83,10 +144,10 @@ class _VersionManagementWidgetState extends State<VersionManagementWidget> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              _performRestore(version);
+              _restoreVersion(version);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
+              backgroundColor: Colors.blue.shade600,
               foregroundColor: Colors.white,
             ),
             child: const Text('Restore'),
@@ -96,178 +157,8 @@ class _VersionManagementWidgetState extends State<VersionManagementWidget> {
     );
   }
 
-  void _performRestore(Version version) {
-    context.read<DocumentBloc>().add(
-      RestoreVersion(
-        documentId: widget.document.id,
-        versionId: version.versionId,
-      ),
-    );
-    
-    // Show loading indicator
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const AlertDialog(
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text('Restoring version...'),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _createNewVersion() {
-    final TextEditingController commentController = TextEditingController();
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Create New Version'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Create a new version of this document with the current content.'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: commentController,
-              decoration: const InputDecoration(
-                labelText: 'Version comment (optional)',
-                border: OutlineInputBorder(),
-                hintText: 'Describe the changes made...',
-              ),
-              maxLines: 3,
-              minLines: 1,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _performCreateVersion(commentController.text);
-            },
-            child: const Text('Create Version'),
-          ),
-        ],
-      ),
-    ).then((_) => commentController.dispose());
-  }
-
-  void _performCreateVersion(String comment) {
-    // Note: This would need to be implemented in the backend
-    // For now, we'll just show a message
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Version creation functionality to be implemented'),
-        backgroundColor: Colors.blue,
-      ),
-    );
-  }
-
   String _formatDate(DateTime date) {
     return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
-  }
-
-  String _formatFileSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-  }
-
-  Widget _buildVersionTile(Version version, bool isLatest) {
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: isLatest ? Colors.green : Colors.grey,
-          child: Text(
-            'v${version.versionNumber}',
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-        ),
-        title: Row(
-          children: [
-            Text('Version ${version.versionNumber}'),
-            if (isLatest) ...[
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.green,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Text(
-                  'CURRENT',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Created: ${_formatDate(version.createdAt)}'),
-            Text('Modified by: ${version.modifiedBy}'),
-            if (version.size > 0) Text('Size: ${_formatFileSize(version.size)}'),
-            if (version.comment?.isNotEmpty == true) ...[
-              const SizedBox(height: 4),
-              Text(
-                version.comment!,
-                style: TextStyle(
-                  fontStyle: FontStyle.italic,
-                  color: Theme.of(context).textTheme.bodySmall?.color,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.visibility),
-              onPressed: () {
-                // TODO: Implement version preview
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Version preview to be implemented'),
-                    backgroundColor: Colors.blue,
-                  ),
-                );
-              },
-              tooltip: 'Preview version',
-            ),
-            if (!isLatest)
-              IconButton(
-                icon: const Icon(Icons.restore),
-                onPressed: () => _restoreVersion(version),
-                tooltip: 'Restore this version',
-              ),
-          ],
-        ),
-        isThreeLine: version.comment?.isNotEmpty == true,
-      ),
-    );
   }
 
   @override
@@ -295,92 +186,230 @@ class _VersionManagementWidgetState extends State<VersionManagementWidget> {
                 ),
               ),
               const Spacer(),
-              ElevatedButton.icon(
-                onPressed: _createNewVersion,
-                icon: const Icon(Icons.add),
-                label: const Text('Create Version'),
-              ),
-              const SizedBox(width: 8),
               IconButton(
                 onPressed: _loadVersions,
                 icon: const Icon(Icons.refresh),
-                tooltip: 'Refresh',
+                tooltip: 'Refresh versions',
               ),
             ],
           ),
         ),
-        
-        // Versions list
+
+        // Version list
         Expanded(
-          child: BlocBuilder<VersionBloc, VersionState>(
-            builder: (context, state) {
-              if (state is VersionsLoading) {
-                return const Center(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _versions.isEmpty
+                  ? const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.history,
+                            size: 64,
+                            color: Colors.grey,
+                          ),
+                          SizedBox(height: 16),
+                          Text(
+                            'No versions available',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _versions.length,
+                      itemBuilder: (context, index) {
+                        final version = _versions[index];
+                        final isLatest = index == 0;
+                        
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: isLatest
+                                  ? Colors.green
+                                  : Colors.blue,
+                              child: Text(
+                                '${_versions.length - index}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            title: Row(
+                              children: [
+                                Text('Version ${_versions.length - index}'),
+                                if (isLatest) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: const Text(
+                                      'CURRENT',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Created: ${_formatDate(version.createdAt)}'),
+                                if (version.comment?.isNotEmpty == true)
+                                  Text(
+                                    'Note: ${version.comment}',
+                                    style: const TextStyle(
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.visibility),
+                                  onPressed: () => _viewVersion(version),
+                                  tooltip: 'View version',
+                                ),
+                                if (!isLatest)
+                                  IconButton(
+                                    icon: const Icon(Icons.restore),
+                                    onPressed: () => _showRestoreConfirmDialog(version),
+                                    tooltip: 'Restore this version',
+                                    color: Colors.blue,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+        ),
+      ],
+    );
+  }
+}
+
+class VersionViewDialog extends StatelessWidget {
+  final DocumentVersion version;
+  final Document document;
+
+  const VersionViewDialog({
+    super.key,
+    required this.version,
+    required this.document,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Version ${version.id}'),
+      content: SizedBox(
+        width: 500,
+        height: 400,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Created: ${_formatDate(version.createdAt)}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            if (version.comment?.isNotEmpty == true) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Comment: ${version.comment}',
+                style: const TextStyle(fontStyle: FontStyle.italic),
+              ),
+            ],
+            const SizedBox(height: 16),
+            const Text(
+              'Document Details:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: SingleChildScrollView(
                   child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('Loading versions...'),
-                    ],
-                  ),
-                );
-              } else if (state is VersionError) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.error_outline, size: 64, color: Colors.red),
-                      const SizedBox(height: 16),
-                      Text('Error: ${state.error}'),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _loadVersions,
-                        child: const Text('Retry'),
+                      Text('Name: ${document.name}'),
+                      Text('Type: ${document.type.name}'),
+                      Text('Size: ${document.file?.lengthSync() ?? 0} bytes'),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Note: This is a preview of the version. The actual file content is preserved.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                          fontStyle: FontStyle.italic,
+                        ),
                       ),
                     ],
                   ),
-                );
-              } else if (state is VersionsLoaded) {
-                final versions = state.versions;
-                
-                if (versions.isEmpty) {
-                  return const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.history, size: 64, color: Colors.grey),
-                        SizedBox(height: 16),
-                        Text('No versions available'),
-                        SizedBox(height: 8),
-                        Text(
-                          'Create a version to save the current state of the document.',
-                          style: TextStyle(color: Colors.grey),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  );
-                }
-                
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: versions.length,
-                  itemBuilder: (context, index) {
-                    final version = versions[index];
-                    final isLatest = index == 0; // Assuming versions are sorted by date desc
-                    return _buildVersionTile(version, isLatest);
-                  },
-                );
-              } else {
-                return const Center(
-                  child: Text('No version data'),
-                );
-              }
-            },
-          ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
         ),
       ],
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+class DocumentVersion {
+  final String id;
+  final DateTime createdAt;
+  final String? comment;
+
+  DocumentVersion({
+    required this.id,
+    required this.createdAt,
+    this.comment,
+  });
+
+  factory DocumentVersion.fromJson(Map<String, dynamic> json) {
+    return DocumentVersion(
+      id: json['id'].toString(),
+      createdAt: DateTime.parse(json['created_at'] ?? json['updated_at']),
+      comment: json['comment'],
     );
   }
 } 

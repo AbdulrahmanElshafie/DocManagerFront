@@ -13,13 +13,36 @@ class UserBloc extends Bloc<UserEvent, UserState> {
   UserBloc({required UserRepository userRepository})
       : _userRepository = userRepository,
         super(const UserInitial()) {
-    on<LoadUser>(_onLoadUser);
+    on<LoadUsers>(_onLoadUsers);
     on<GetCurrentUser>(_onGetCurrentUser);
+    on<LoadUser>(_onLoadUser);
     on<CreateUser>(_onCreateUser);
     on<UpdateUser>(_onUpdateUser);
-    on<UpdateUserProfile>(_onUpdateUserProfile);
     on<UpdateUserPassword>(_onUpdateUserPassword);
     on<DeleteUser>(_onDeleteUser);
+    on<ResetPassword>(_onResetPassword);
+  }
+
+  Future<void> _onLoadUsers(LoadUsers event, Emitter<UserState> emit) async {
+    try {
+      emit(const UsersLoading());
+      final users = await _userRepository.getUsers();
+      emit(UsersLoaded(users));
+    } catch (error) {
+      LoggerUtil.error('Failed to load users: $error');
+      emit(UserError('Failed to load users: $error'));
+    }
+  }
+
+  Future<void> _onGetCurrentUser(GetCurrentUser event, Emitter<UserState> emit) async {
+    try {
+      emit(const UserLoading());
+      final user = await _userRepository.getUser('current');
+      emit(UserLoaded(user));
+    } catch (error) {
+      LoggerUtil.error('Failed to get current user: $error');
+      emit(UserError('Failed to get current user: $error'));
+    }
   }
 
   Future<void> _onLoadUser(LoadUser event, Emitter<UserState> emit) async {
@@ -34,19 +57,6 @@ class UserBloc extends Bloc<UserEvent, UserState> {
     }
   }
 
-  Future<void> _onGetCurrentUser(GetCurrentUser event, Emitter<UserState> emit) async {
-    try {
-      emit(const UserLoading());
-      // Use empty string for current user - API will use auth token
-      final user = await _userRepository.getUser("");
-      _currentUser = user;
-      emit(UserLoaded(user));
-    } catch (error) {
-      developer.log('Failed to get current user: $error', name: 'UserBloc');
-      emit(UserError('Failed to get current user: $error'));
-    }
-  }
-
   Future<void> _onCreateUser(CreateUser event, Emitter<UserState> emit) async {
     try {
       emit(const UserLoading());
@@ -56,89 +66,42 @@ class UserBloc extends Bloc<UserEvent, UserState> {
         event.email,
         event.password,
         event.password2,
-        event.username
+        event.username,
       );
       emit(UserCreated(user));
-      emit(const UserOperationSuccess('User created successfully'));
+      emit(const UserSuccess('User created successfully'));
     } catch (error) {
       LoggerUtil.error('Failed to create user: $error');
       emit(UserError('Failed to create user: $error'));
     }
   }
 
-  Future<void> _onUpdateUserProfile(UpdateUserProfile event, Emitter<UserState> emit) async {
+  Future<void> _onUpdateUser(UpdateUser event, Emitter<UserState> emit) async {
     try {
       emit(const UserLoading());
-      
-      if (_currentUser == null) {
-        throw Exception("No current user available");
-      }
-      
-      // Create updated user object with the new profile data
-      final updatedUser = _currentUser!.copyWith(
-        firstName: event.firstName ?? _currentUser!.firstName,
-        lastName: event.lastName ?? _currentUser!.lastName,
-        email: event.email ?? _currentUser!.email,
-        username: event.username ?? _currentUser!.username,
-      );
-      
-      final user = await _userRepository.updateUser(updatedUser);
-      _currentUser = user;
-      
-      emit(UserUpdated({'user': user.toJson()}));
-      emit(const UserOperationSuccess('Profile updated successfully'));
+      final updatedUser = await _userRepository.updateUser(event.user);
+      _currentUser = updatedUser;
+      emit(UserLoaded(updatedUser));
+      emit(const UserSuccess('User updated successfully'));
     } catch (error) {
-      developer.log('Failed to update user profile: $error', name: 'UserBloc');
-      emit(UserError('Failed to update profile: $error'));
+      LoggerUtil.error('Failed to update user: $error');
+      emit(UserError('Failed to update user: $error'));
     }
   }
 
   Future<void> _onUpdateUserPassword(UpdateUserPassword event, Emitter<UserState> emit) async {
     try {
       emit(const UserLoading());
-
-      // Validate passwords match
-      if (event.newPassword != event.confirmPassword) {
-        throw Exception("New password and confirmation do not match");
-      }
-      
-      // Call the password reset API
-      await _userRepository.resetPassword(
-        event.currentPassword, 
-        event.newPassword, 
-        event.confirmPassword
+      final result = await _userRepository.resetPassword(
+        event.currentPassword,
+        event.newPassword,
+        event.confirmPassword,
       );
-      
-      emit(const UserOperationSuccess('Password updated successfully'));
+      emit(PasswordResetSuccess(result));
+      emit(const UserSuccess('Password updated successfully'));
     } catch (error) {
-      developer.log('Failed to update password: $error', name: 'UserBloc');
+      LoggerUtil.error('Failed to update password: $error');
       emit(UserError('Failed to update password: $error'));
-    }
-  }
-
-  Future<void> _onUpdateUser(UpdateUser event, Emitter<UserState> emit) async {
-    try {
-      emit(const UserLoading());
-      
-      // This is for backward compatibility with existing code
-      if (_currentUser == null) {
-        throw Exception("No current user available");
-      }
-      
-      // Create a user object from the current user with updated name
-      final userToUpdate = _currentUser!.copyWith(
-        firstName: event.name,
-        lastName: _currentUser!.lastName,
-      );
-      
-      final updatedUser = await _userRepository.updateUser(userToUpdate);
-      _currentUser = updatedUser;
-      
-      emit(UserUpdated({'user': updatedUser.toJson()}));
-      emit(const UserOperationSuccess('User updated successfully'));
-    } catch (error) {
-      LoggerUtil.error('Failed to update user: $error');
-      emit(UserError('Failed to update user: $error'));
     }
   }
 
@@ -147,10 +110,26 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       emit(const UserLoading());
       final result = await _userRepository.deleteUser(event.id);
       emit(UserDeleted(result));
-      emit(const UserOperationSuccess('User deleted successfully'));
+      emit(const UserSuccess('User deleted successfully'));
     } catch (error) {
       LoggerUtil.error('Failed to delete user: $error');
       emit(UserError('Failed to delete user: $error'));
+    }
+  }
+
+  Future<void> _onResetPassword(ResetPassword event, Emitter<UserState> emit) async {
+    try {
+      emit(const UserLoading());
+      final result = await _userRepository.resetPassword(
+        event.currentPassword,
+        event.newPassword,
+        event.confirmPassword,
+      );
+      emit(PasswordResetSuccess(result));
+      emit(const UserSuccess('Password reset successfully'));
+    } catch (error) {
+      LoggerUtil.error('Failed to reset password: $error');
+      emit(UserError('Failed to reset password: $error'));
     }
   }
 } 

@@ -37,4 +37,11 @@ class API {
   
   // Comment Endpoints
   static const String comments = '/manager/comment/';
+  
+  // Activity Log Endpoints
+  static const String activityLogs = '/manager/activity/';
+  static const String activityStats = '/manager/activity/stats/';
+  static const String documentActivity = '/manager/activity/document/';
+  static const String folderActivity = '/manager/activity/folder/';
+  static const String userActivity = '/manager/activity/user/';
 }

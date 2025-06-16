@@ -1,19 +1,25 @@
 import 'dart:typed_data';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import '../models/document.dart';
 import '../shared/utils/logger.dart';
+import '../shared/network/api_service.dart';
+import '../shared/services/websocket_service.dart';
+import 'dart:developer' as developer;
 
 class ImprovedPdfViewer extends StatefulWidget {
   final Document document;
   final Uint8List? pdfBytes;
   final String? pdfUrl;
+  final Function(String content, String contentType)? onSave;
 
   const ImprovedPdfViewer({
     super.key,
     required this.document,
     this.pdfBytes,
     this.pdfUrl,
+    this.onSave,
   });
 
   @override
@@ -21,165 +27,447 @@ class ImprovedPdfViewer extends StatefulWidget {
 }
 
 class _ImprovedPdfViewerState extends State<ImprovedPdfViewer> {
-  final GlobalKey<SfPdfViewerState> _pdfViewerKey = GlobalKey();
   late PdfViewerController _pdfController;
+  final GlobalKey<SfPdfViewerState> _pdfViewerKey = GlobalKey();
+
+  final ApiService _apiService = ApiService();
+  final WebSocketService _webSocketService = WebSocketService();
   
-  // Search functionality
-  bool _showSearchBar = false;
-  final TextEditingController _searchController = TextEditingController();
-  final FocusNode _searchFocusNode = FocusNode();
+  // Real-time editing state
+  bool _isConnected = false;
+  String _lastSaveTime = '';
+  StreamSubscription? _connectionSubscription;
+  StreamSubscription? _saveStatusSubscription;
+  StreamSubscription? _errorSubscription;
+  StreamSubscription? _documentUpdateSubscription;
+  
+  // Annotation and interaction state
+  PdfInteractionMode _interactionMode = PdfInteractionMode.selection;
+  bool _isAnnotationMode = false;
+  bool _isNoteMode = false;
+  bool _isDrawingMode = false;
+  Color _selectedAnnotationColor = Colors.yellow;
+  double _strokeWidth = 2.0;
+  List<PdfAnnotation> _annotations = [];
+  List<PdfNote> _notes = [];
+  
+  // Drawing annotations
+  List<Map<String, dynamic>> _drawingAnnotations = [];
+  
+  // Search state
   PdfTextSearchResult? _searchResult;
-  int _currentSearchResultIndex = 0;
   bool _isSearching = false;
+  String _searchText = '';
+  int _currentSearchIndex = 0;
   
   // UI state
-  bool _showAppBar = true;
+  bool _canShowScrollHead = false;
   int _currentPageNumber = 1;
   int _totalPageCount = 0;
-  double _zoomLevel = 1.0;
+  bool _isLoading = false;
+  bool _hasError = false;
+  String _errorMessage = '';
   
-  // Text selection and highlighting
-  bool _canShowScrollHead = false;
-  PdfTextSelectionChangedDetails? _textSelectionDetails;
-
   @override
   void initState() {
     super.initState();
     _pdfController = PdfViewerController();
-    _searchController.addListener(_onSearchTextChanged);
+    _initializeWebSocket();
+    _loadAnnotations();
   }
 
   @override
   void dispose() {
-    _searchController.removeListener(_onSearchTextChanged);
-    _searchController.dispose();
-    _searchFocusNode.dispose();
+    _connectionSubscription?.cancel();
+    _saveStatusSubscription?.cancel();
+    _errorSubscription?.cancel();
+    _documentUpdateSubscription?.cancel();
+    _webSocketService.disconnect();
+
     _pdfController.dispose();
     super.dispose();
   }
 
-  void _onSearchTextChanged() {
-    if (_searchController.text.isNotEmpty) {
-      _performSearch(_searchController.text);
-    } else {
-      _clearSearch();
+  Future<void> _initializeWebSocket() async {
+    try {
+      await _webSocketService.connectToDocument(widget.document.id);
+      
+      // Listen to connection state
+      _connectionSubscription = _webSocketService.connectionState.listen((isConnected) {
+        if (mounted) {
+          setState(() {
+            _isConnected = isConnected;
+          });
+        }
+      });
+      
+      // Listen to save status
+      _saveStatusSubscription = _webSocketService.saveStatus.listen((status) {
+        if (mounted) {
+          setState(() {
+            _lastSaveTime = status.timestamp;
+          });
+          
+          if (status.success) {
+            _showSnackBar(
+              status.isAutoSave ? 'Auto-saved' : 'Saved',
+              Colors.green,
+              Icons.check_circle,
+            );
+          } else {
+            _showSnackBar('Save failed', Colors.red, Icons.error);
+          }
+        }
+      });
+      
+      // Listen to errors
+      _errorSubscription = _webSocketService.errors.listen((error) {
+        if (mounted) {
+          _showSnackBar('Connection error: $error', Colors.red, Icons.error);
+        }
+      });
+      
+    } catch (e) {
+      LoggerUtil.error('Failed to setup WebSocket: $e');
+      if (mounted) {
+        _showSnackBar('Failed to connect: $e', Colors.red, Icons.error);
+      }
     }
   }
 
-  Future<void> _performSearch(String query) async {
-    if (query.trim().isEmpty) return;
-    
-    setState(() {
-      _isSearching = true;
-    });
+  void _showSnackBar(String message, Color color, IconData icon) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(icon, color: Colors.white),
+              const SizedBox(width: 8),
+              Expanded(child: Text(message)),
+            ],
+          ),
+          backgroundColor: color,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
 
+  Future<void> _loadAnnotations() async {
     try {
-      _searchResult = await _pdfController.searchText(query);
-      if (_searchResult != null && _searchResult!.totalInstanceCount > 0) {
-        setState(() {
-          _currentSearchResultIndex = 1;
-          _isSearching = false;
-        });
-        // Highlight the first result
-        _searchResult!.nextInstance();
-      } else {
-        setState(() {
-          _isSearching = false;
-        });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('No results found for "$query"'),
-              duration: const Duration(seconds: 2),
-            ),
-          );
+      setState(() {
+        _isLoading = true;
+        _hasError = false;
+        _errorMessage = '';
+      });
+      
+      // Use correct API endpoint format
+      final response = await _apiService.get(
+        '/manager/document/${widget.document.id}/annotations/',
+        {}
+      );
+      
+      developer.log('Annotations response: $response', name: 'PdfViewer');
+      
+      // Handle annotations data properly
+      if (response.isNotEmpty) {
+        // Parse drawing annotations
+        if (response['drawings'] != null) {
+          final drawingsData = response['drawings'] as List;
+          setState(() {
+            _drawingAnnotations = drawingsData.cast<Map<String, dynamic>>();
+          });
+        }
+        
+        // Parse text annotations
+        if (response['annotations'] != null) {
+          final annotationsData = response['annotations'] as List;
+          final loadedAnnotations = <PdfAnnotation>[];
+          
+          for (final data in annotationsData) {
+            try {
+              loadedAnnotations.add(PdfAnnotation.fromJson(data as Map<String, dynamic>));
+            } catch (e) {
+              developer.log('Error parsing annotation: $e', name: 'PdfViewer');
+            }
+          }
+          
+          setState(() {
+            _annotations = loadedAnnotations;
+          });
+        }
+        
+        // Parse notes
+        if (response['notes'] != null) {
+          final notesData = response['notes'] as List;
+          final loadedNotes = <PdfNote>[];
+          
+          for (final data in notesData) {
+            try {
+              loadedNotes.add(PdfNote.fromJson(data as Map<String, dynamic>));
+            } catch (e) {
+              developer.log('Error parsing note: $e', name: 'PdfViewer');
+            }
+          }
+          
+          setState(() {
+            _notes = loadedNotes;
+          });
         }
       }
+      
+      developer.log('Loaded ${_drawingAnnotations.length} drawings, ${_annotations.length} annotations and ${_notes.length} notes', name: 'PdfViewer');
+      
     } catch (e) {
-      LoggerUtil.error('Error performing search: $e');
+      LoggerUtil.error('Failed to load annotations: $e');
+      
+      // Don't show error for initial load - annotations might not exist yet for new documents
+      // Only set error state if it's not a 404 (file not found) error
+      if (!e.toString().contains('404')) {
+        setState(() {
+          _hasError = true;
+          _errorMessage = 'Failed to load annotations: $e';
+        });
+      }
+      
+      developer.log('Annotations load error (may be normal for new documents): $e', name: 'PdfViewer');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _saveAnnotations() async {
+    try {
       setState(() {
-        _isSearching = false;
+        _isLoading = true;
+      });
+      
+      final annotationsJson = _annotations.map((a) => a.toJson()).toList();
+      final notesJson = _notes.map((n) => n.toJson()).toList();
+      
+      developer.log('Saving ${_drawingAnnotations.length} drawings, ${annotationsJson.length} annotations and ${notesJson.length} notes', name: 'PdfViewer');
+      
+      await _apiService.put(
+        '/manager/document/${widget.document.id}/annotations/',
+        {
+          'drawings': _drawingAnnotations,
+          'annotations': annotationsJson,
+          'notes': notesJson,
+        },
+        ''
+      );
+
+      _showSnackBar('Annotations saved successfully', Colors.green, Icons.check_circle);
+      
+    } catch (e) {
+      LoggerUtil.error('Failed to save annotations: $e');
+      _showSnackBar('Failed to save annotations: $e', Colors.red, Icons.error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  void _onPageChanged(PdfPageChangedDetails details) {
+    setState(() {
+      _currentPageNumber = details.newPageNumber;
+    });
+  }
+
+  void _onDocumentLoaded(PdfDocumentLoadedDetails details) {
+    setState(() {
+      _totalPageCount = details.document.pages.count;
+    });
+  }
+
+  void _onTextSelectionChanged(PdfTextSelectionChangedDetails details) {
+    if (details.selectedText == null || details.selectedText!.isEmpty) {
+      return;
+    }
+    
+    if (_isAnnotationMode) {
+      _addTextAnnotation(details);
+    }
+  }
+
+  void _addTextAnnotation(PdfTextSelectionChangedDetails details) {
+    final annotation = PdfAnnotation(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      text: details.selectedText ?? '',
+      bounds: details.globalSelectedRegion ?? Rect.zero,
+      pageNumber: _currentPageNumber,
+      color: _selectedAnnotationColor,
+      timestamp: DateTime.now(),
+    );
+    
+    setState(() {
+      _annotations.add(annotation);
+    });
+    
+    _saveAnnotations();
+    
+    // Show feedback
+    _showSnackBar('Text annotation added', Colors.blue, Icons.highlight);
+  }
+
+  void _addNote(double x, double y) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        String noteText = '';
+        return AlertDialog(
+          title: const Text('Add Note'),
+          content: TextField(
+            onChanged: (value) => noteText = value,
+            decoration: const InputDecoration(
+              hintText: 'Enter your note...',
+              border: OutlineInputBorder(),
+            ),
+            maxLines: 3,
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (noteText.trim().isNotEmpty) {
+                  final note = PdfNote(
+                    id: DateTime.now().millisecondsSinceEpoch.toString(),
+                    text: noteText.trim(),
+                    x: x,
+                    y: y,
+                    pageNumber: _currentPageNumber,
+                    color: _selectedAnnotationColor,
+                    timestamp: DateTime.now(),
+                  );
+                  
+                  setState(() {
+                    _notes.add(note);
+                  });
+                  
+                  _saveAnnotations();
+                  Navigator.pop(context);
+                  
+                  _showSnackBar('Note added', Colors.blue, Icons.note_add);
+                }
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _removeAnnotation(String id) {
+    setState(() {
+      _annotations.removeWhere((annotation) => annotation.id == id);
+    });
+    _saveAnnotations();
+    _showSnackBar('Annotation removed', Colors.orange, Icons.delete);
+  }
+
+  void _removeNote(String id) {
+    setState(() {
+      _notes.removeWhere((note) => note.id == id);
+    });
+    _saveAnnotations();
+    _showSnackBar('Note removed', Colors.orange, Icons.delete);
+  }
+
+  void _startSearch() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Search PDF'),
+          content: TextField(
+            onChanged: (value) => _searchText = value,
+            decoration: const InputDecoration(
+              hintText: 'Enter search text...',
+              border: OutlineInputBorder(),
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (_searchText.trim().isNotEmpty) {
+                  _performSearch();
+                  Navigator.pop(context);
+                }
+              },
+              child: const Text('Search'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _performSearch() {
+    setState(() {
+      _isSearching = true;
+      _currentSearchIndex = 0;
+    });
+    
+    _searchResult = _pdfController.searchText(_searchText);
+    
+    if (_searchResult != null) {
+      _searchResult!.addListener(() {
+        if (mounted) {
+          setState(() {
+            _isSearching = false;
+          });
+        }
       });
     }
   }
 
+  void _searchNext() {
+    if (_searchResult != null) {
+      _searchResult!.nextInstance();
+    }
+  }
+
+  void _searchPrevious() {
+    if (_searchResult != null) {
+      _searchResult!.previousInstance();
+    }
+  }
+
   void _clearSearch() {
-    _searchResult?.clear();
-    setState(() {
-      _searchResult = null;
-      _currentSearchResultIndex = 0;
-      _isSearching = false;
-    });
-  }
-
-  void _nextSearchResult() {
-    if (_searchResult != null && _searchResult!.hasResult) {
-      if (_currentSearchResultIndex < _searchResult!.totalInstanceCount) {
-        setState(() {
-          _currentSearchResultIndex++;
-        });
-        _searchResult!.nextInstance();
-      }
+    if (_searchResult != null) {
+      _searchResult!.clear();
+      setState(() {
+        _searchResult = null;
+        _isSearching = false;
+        _searchText = '';
+      });
     }
   }
 
-  void _previousSearchResult() {
-    if (_searchResult != null && _searchResult!.hasResult) {
-      if (_currentSearchResultIndex > 1) {
-        setState(() {
-          _currentSearchResultIndex--;
-        });
-        _searchResult!.previousInstance();
-      }
-    }
-  }
-
-  void _toggleSearchBar() {
-    setState(() {
-      _showSearchBar = !_showSearchBar;
-      if (_showSearchBar) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _searchFocusNode.requestFocus();
-        });
-      } else {
-        _clearSearch();
-        _searchController.clear();
-      }
-    });
-  }
-
-  void _zoomIn() {
-    _pdfController.zoomLevel = (_pdfController.zoomLevel + 0.25).clamp(0.5, 3.0);
-  }
-
-  void _zoomOut() {
-    _pdfController.zoomLevel = (_pdfController.zoomLevel - 0.25).clamp(0.5, 3.0);
-  }
-
-  void _resetZoom() {
-    _pdfController.zoomLevel = 1.0;
-  }
-
-  void _goToPage(int pageNumber) {
-    _pdfController.jumpToPage(pageNumber);
-  }
-
-  void _showPageJumpDialog() {
-    final TextEditingController pageController = TextEditingController();
-    
+  void _clearAllAnnotations() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Go to Page'),
-        content: TextField(
-          controller: pageController,
-          keyboardType: TextInputType.number,
-          decoration: InputDecoration(
-            labelText: 'Page number (1-$_totalPageCount)',
-            border: const OutlineInputBorder(),
-          ),
-          autofocus: true,
-        ),
+        title: const Text('Clear All Annotations'),
+        content: const Text('Are you sure you want to remove all annotations, drawings, and notes? This action cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -187,172 +475,430 @@ class _ImprovedPdfViewerState extends State<ImprovedPdfViewer> {
           ),
           ElevatedButton(
             onPressed: () {
-              final pageNumber = int.tryParse(pageController.text);
-              if (pageNumber != null && pageNumber >= 1 && pageNumber <= _totalPageCount) {
-                _goToPage(pageNumber);
-                Navigator.pop(context);
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Please enter a valid page number'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
+              setState(() {
+                _drawingAnnotations.clear();
+                _annotations.clear();
+                _notes.clear();
+              });
+              _saveAnnotations();
+              Navigator.pop(context);
+              _showSnackBar('All annotations cleared', Colors.orange, Icons.clear);
             },
-            child: const Text('Go'),
-          ),
-        ],
-      ),
-    ).then((_) => pageController.dispose());
-  }
-
-  Widget _buildSearchBar() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: Theme.of(context).colorScheme.surface,
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              decoration: InputDecoration(
-                hintText: 'Search in document...',
-                prefixIcon: _isSearching 
-                  ? const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    )
-                  : const Icon(Icons.search),
-                suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear),
-                      onPressed: () {
-                        _searchController.clear();
-                        _clearSearch();
-                      },
-                    )
-                  : null,
-                border: const OutlineInputBorder(),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              ),
-              onSubmitted: (value) => _performSearch(value),
-            ),
-          ),
-          if (_searchResult != null && _searchResult!.hasResult) ...[
-            const SizedBox(width: 8),
-            Text(
-              '$_currentSearchResultIndex of ${_searchResult!.totalInstanceCount}',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            IconButton(
-              icon: const Icon(Icons.keyboard_arrow_up),
-              onPressed: _previousSearchResult,
-              tooltip: 'Previous result',
-            ),
-            IconButton(
-              icon: const Icon(Icons.keyboard_arrow_down),
-              onPressed: _nextSearchResult,
-              tooltip: 'Next result',
-            ),
-          ],
-          IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: _toggleSearchBar,
-            tooltip: 'Close search',
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Clear All', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildToolbar() {
+  Widget _buildTopToolbar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      color: Theme.of(context).colorScheme.surfaceVariant,
-      child: Row(
-        children: [
-          // Page navigation
-          IconButton(
-            icon: const Icon(Icons.first_page),
-            onPressed: _currentPageNumber > 1 ? () => _goToPage(1) : null,
-            tooltip: 'First page',
+      padding: const EdgeInsets.all(8.0),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          bottom: BorderSide(
+            color: Theme.of(context).dividerColor,
           ),
-          IconButton(
-            icon: const Icon(Icons.navigate_before),
-            onPressed: _currentPageNumber > 1 
-              ? () => _pdfController.previousPage() 
-              : null,
-            tooltip: 'Previous page',
-          ),
-          
-          // Page indicator
-          GestureDetector(
-            onTap: _showPageJumpDialog,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: Theme.of(context).dividerColor),
+        ),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            // Zoom controls
+            IconButton(
+              onPressed: () => _pdfController.zoomLevel = _pdfController.zoomLevel * 0.8,
+              icon: const Icon(Icons.zoom_out),
+              tooltip: 'Zoom Out',
+            ),
+            IconButton(
+              onPressed: () => _pdfController.zoomLevel = _pdfController.zoomLevel * 1.2,
+              icon: const Icon(Icons.zoom_in),
+              tooltip: 'Zoom In',
+            ),
+            
+            const SizedBox(width: 16),
+            
+            // Annotation tools
+            IconButton(
+              onPressed: () => setState(() {
+                _isAnnotationMode = !_isAnnotationMode;
+                _isNoteMode = false;
+                _isDrawingMode = false;
+                if (_isAnnotationMode) {
+                  _interactionMode = PdfInteractionMode.selection;
+                }
+              }),
+              icon: const Icon(Icons.highlight),
+              tooltip: 'Highlight Text',
+              color: _isAnnotationMode ? Theme.of(context).primaryColor : null,
+            ),
+            IconButton(
+              onPressed: () => setState(() {
+                _isDrawingMode = !_isDrawingMode;
+                _isAnnotationMode = false;
+                _isNoteMode = false;
+                if (_isDrawingMode) {
+                  _interactionMode = PdfInteractionMode.pan;
+                } else {
+                  _interactionMode = PdfInteractionMode.selection;
+                }
+              }),
+              icon: const Icon(Icons.draw),
+              tooltip: 'Draw on PDF',
+              color: _isDrawingMode ? Theme.of(context).primaryColor : null,
+            ),
+            IconButton(
+              onPressed: () => setState(() {
+                _isNoteMode = !_isNoteMode;
+                _isAnnotationMode = false;
+                _isDrawingMode = false;
+              }),
+              icon: const Icon(Icons.note_add),
+              tooltip: 'Add Note',
+              color: _isNoteMode ? Theme.of(context).primaryColor : null,
+            ),
+            
+            // Color picker
+            PopupMenuButton<Color>(
+              icon: Icon(
+                Icons.color_lens,
+                color: _selectedAnnotationColor,
               ),
-              child: Text(
-                '$_currentPageNumber / $_totalPageCount',
-                style: Theme.of(context).textTheme.bodyMedium,
+              tooltip: 'Select Color',
+              onSelected: (color) => setState(() {
+                _selectedAnnotationColor = color;
+              }),
+              itemBuilder: (context) => [
+                Colors.yellow,
+                Colors.green,
+                Colors.blue,
+                Colors.red,
+                Colors.orange,
+                Colors.purple,
+              ].map((color) => PopupMenuItem<Color>(
+                value: color,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.grey),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text('Color'),
+                  ],
+                ),
+              )).toList(),
+            ),
+            
+            // Stroke width picker
+            if (_isDrawingMode)
+              PopupMenuButton<double>(
+                icon: const Icon(Icons.line_weight),
+                tooltip: 'Stroke Width',
+                onSelected: (width) => setState(() {
+                  _strokeWidth = width;
+                }),
+                itemBuilder: (context) => [
+                  1.0, 2.0, 3.0, 4.0, 5.0, 6.0
+                ].map((width) => PopupMenuItem<double>(
+                  value: width,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 30,
+                        height: width * 2,
+                        decoration: BoxDecoration(
+                          color: Colors.black,
+                          borderRadius: BorderRadius.circular(width),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text('${width.toInt()}px'),
+                    ],
+                  ),
+                )).toList(),
+              ),
+            
+            const SizedBox(width: 16),
+            
+            // Search controls
+            IconButton(
+              onPressed: _startSearch,
+              icon: const Icon(Icons.search),
+              tooltip: 'Search PDF',
+            ),
+            
+            if (_searchResult != null) ...[
+              IconButton(
+                onPressed: _searchPrevious,
+                icon: const Icon(Icons.keyboard_arrow_up),
+                tooltip: 'Previous Result',
+              ),
+              IconButton(
+                onPressed: _searchNext,
+                icon: const Icon(Icons.keyboard_arrow_down),
+                tooltip: 'Next Result',
+              ),
+              IconButton(
+                onPressed: _clearSearch,
+                icon: const Icon(Icons.close),
+                tooltip: 'Clear Search',
+              ),
+            ],
+            
+            const SizedBox(width: 16),
+            
+            // Save button
+            ElevatedButton.icon(
+              onPressed: _isLoading ? null : _saveAnnotations,
+              icon: _isLoading 
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save),
+              label: const Text('Save'),
+            ),
+            
+            const SizedBox(width: 8),
+            
+            // Clear annotations button
+            if (_drawingAnnotations.isNotEmpty || _annotations.isNotEmpty || _notes.isNotEmpty)
+              TextButton.icon(
+                onPressed: _clearAllAnnotations,
+                icon: const Icon(Icons.clear_all, color: Colors.red),
+                label: const Text('Clear All', style: TextStyle(color: Colors.red)),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPdfViewer() {
+    // Check if we have PDF data
+    if (widget.pdfBytes == null || widget.pdfBytes!.isEmpty) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.picture_as_pdf, size: 64, color: Colors.grey),
+            SizedBox(height: 16),
+            Text(
+              'No PDF data available',
+              style: TextStyle(fontSize: 18, color: Colors.grey),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTapDown: (details) {
+        if (_isNoteMode) {
+          final renderBox = context.findRenderObject() as RenderBox?;
+          if (renderBox != null) {
+            final localPosition = renderBox.globalToLocal(details.globalPosition);
+            _addNote(localPosition.dx, localPosition.dy);
+          }
+        }
+      },
+      child: SfPdfViewer.memory(
+        widget.pdfBytes!,
+        key: _pdfViewerKey,
+        controller: _pdfController,
+        canShowScrollHead: _canShowScrollHead,
+        canShowScrollStatus: true,
+        canShowPaginationDialog: true,
+        enableDoubleTapZooming: true,
+        enableTextSelection: !_isDrawingMode,
+        onPageChanged: _onPageChanged,
+        onDocumentLoaded: _onDocumentLoaded,
+        onTextSelectionChanged: _onTextSelectionChanged,
+        interactionMode: _interactionMode,
+      ),
+    );
+  }
+
+  Widget _buildNotesOverlay() {
+    final currentPageNotes = _notes.where((note) => note.pageNumber == _currentPageNumber).toList();
+    
+    if (currentPageNotes.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return IgnorePointer(
+      ignoring: !_isNoteMode,
+      child: Stack(
+        children: currentPageNotes.map((note) => Positioned(
+          left: note.x.clamp(0.0, MediaQuery.of(context).size.width - 50),
+          top: note.y.clamp(50.0, MediaQuery.of(context).size.height - 100),
+          child: GestureDetector(
+            onTap: () => _showNoteDetails(note),
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: note.color.withOpacity(0.8),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: const Icon(
+                Icons.note,
+                color: Colors.white,
+                size: 24,
               ),
             ),
           ),
-          
-          IconButton(
-            icon: const Icon(Icons.navigate_next),
-            onPressed: _currentPageNumber < _totalPageCount 
-              ? () => _pdfController.nextPage() 
-              : null,
-            tooltip: 'Next page',
+        )).toList(),
+      ),
+    );
+  }
+
+  void _showNoteDetails(PdfNote note) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.note, color: note.color),
+            const SizedBox(width: 8),
+            Expanded(child: Text('Note - Page ${note.pageNumber}')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                note.text,
+                style: const TextStyle(fontSize: 16),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Added: ${note.timestamp.toString().split('.')[0]}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _removeNote(note.id);
+            },
+            icon: const Icon(Icons.delete, color: Colors.red),
+            label: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),
-          IconButton(
-            icon: const Icon(Icons.last_page),
-            onPressed: _currentPageNumber < _totalPageCount 
-              ? () => _goToPage(_totalPageCount) 
-              : null,
-            tooltip: 'Last page',
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
           ),
-          
-          const VerticalDivider(),
-          
-          // Zoom controls
-          IconButton(
-            icon: const Icon(Icons.zoom_out),
-            onPressed: _zoomOut,
-            tooltip: 'Zoom out',
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          top: BorderSide(
+            color: Theme.of(context).dividerColor,
           ),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Page $_currentPageNumber of $_totalPageCount',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              if (_drawingAnnotations.isNotEmpty || _annotations.isNotEmpty || _notes.isNotEmpty) ...[
+                const SizedBox(width: 16),
+                Text(
+                  '${_drawingAnnotations.length} drawings, ${_annotations.length} annotations, ${_notes.length} notes',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ],
+          ),
+          Row(
+            children: [
+              Icon(
+                _isConnected ? Icons.wifi : Icons.wifi_off,
+                size: 16,
+                color: _isConnected ? Colors.green : Colors.red,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                _isConnected ? 'Connected' : 'Disconnected',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              if (_lastSaveTime.isNotEmpty) ...[
+                const SizedBox(width: 16),
+                Text(
+                  'Last saved: ${_lastSaveTime.split('T')[1].split('.')[0]}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorWidget() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.error, size: 64, color: Colors.red),
+          const SizedBox(height: 16),
           Text(
-            '${(_zoomLevel * 100).round()}%',
+            'Error loading PDF',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _errorMessage,
             style: Theme.of(context).textTheme.bodyMedium,
+            textAlign: TextAlign.center,
           ),
-          IconButton(
-            icon: const Icon(Icons.zoom_in),
-            onPressed: _zoomIn,
-            tooltip: 'Zoom in',
-          ),
-          IconButton(
-            icon: const Icon(Icons.center_focus_strong),
-            onPressed: _resetZoom,
-            tooltip: 'Reset zoom',
-          ),
-          
-          const Spacer(),
-          
-          // Search button
-          IconButton(
-            icon: Icon(_showSearchBar ? Icons.search_off : Icons.search),
-            onPressed: _toggleSearchBar,
-            tooltip: _showSearchBar ? 'Hide search' : 'Search',
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () {
+              setState(() {
+                _hasError = false;
+                _errorMessage = '';
+              });
+              _loadAnnotations();
+            },
+            child: const Text('Retry'),
           ),
         ],
       ),
@@ -361,145 +907,140 @@ class _ImprovedPdfViewerState extends State<ImprovedPdfViewer> {
 
   @override
   Widget build(BuildContext context) {
+    if (_hasError) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(widget.document.name),
+          backgroundColor: Colors.red.shade50,
+        ),
+        body: _buildErrorWidget(),
+      );
+    }
+
     return Scaffold(
-      appBar: _showAppBar ? AppBar(
-        title: Text(widget.document.name),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.fullscreen),
-            onPressed: () {
-              setState(() {
-                _showAppBar = false;
-              });
-            },
-            tooltip: 'Fullscreen',
-          ),
-        ],
-      ) : null,
       body: Column(
         children: [
-          if (!_showAppBar)
-            Container(
-              width: double.infinity,
-              color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.fullscreen_exit),
-                        onPressed: () {
-                          setState(() {
-                            _showAppBar = true;
-                          });
-                        },
-                        tooltip: 'Exit fullscreen',
-                      ),
-                      Expanded(
-                        child: Center(
-                          child: Text(
-                            widget.document.name,
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          if (_showSearchBar) _buildSearchBar(),
-          _buildToolbar(),
+          _buildTopToolbar(),
           Expanded(
-            child: _buildPdfViewer(),
+            child: Stack(
+              children: [
+                Positioned.fill(child: _buildPdfViewer()),
+                if (_notes.isNotEmpty) 
+                  Positioned.fill(child: _buildNotesOverlay()),
+                if (_isLoading)
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.black26,
+                      child: const Center(
+                        child: CircularProgressIndicator(),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
+          _buildStatusBar(),
         ],
       ),
     );
   }
+}
 
-  Widget _buildPdfViewer() {
-    if (widget.pdfBytes != null) {
-      return SfPdfViewer.memory(
-        widget.pdfBytes!,
-        key: _pdfViewerKey,
-        controller: _pdfController,
-        enableTextSelection: true,
-        enableHyperlinkNavigation: true,
-        canShowScrollHead: _canShowScrollHead,
-        canShowScrollStatus: true,
-        canShowPaginationDialog: true,
-        onDocumentLoaded: (PdfDocumentLoadedDetails details) {
-          setState(() {
-            _totalPageCount = details.document.pages.count;
-          });
-        },
-        onPageChanged: (PdfPageChangedDetails details) {
-          setState(() {
-            _currentPageNumber = details.newPageNumber;
-          });
-        },
-        onZoomLevelChanged: (PdfZoomDetails details) {
-          setState(() {
-            _zoomLevel = details.newZoomLevel;
-          });
-        },
-        onTextSelectionChanged: (PdfTextSelectionChangedDetails details) {
-          setState(() {
-            _textSelectionDetails = details;
-            _canShowScrollHead = details.selectedText?.isNotEmpty ?? false;
-          });
-        },
-      );
-    } else if (widget.pdfUrl != null) {
-      return SfPdfViewer.network(
-        widget.pdfUrl!,
-        key: _pdfViewerKey,
-        controller: _pdfController,
-        enableTextSelection: true,
-        enableHyperlinkNavigation: true,
-        canShowScrollHead: _canShowScrollHead,
-        canShowScrollStatus: true,
-        canShowPaginationDialog: true,
-        onDocumentLoaded: (PdfDocumentLoadedDetails details) {
-          setState(() {
-            _totalPageCount = details.document.pages.count;
-          });
-        },
-        onPageChanged: (PdfPageChangedDetails details) {
-          setState(() {
-            _currentPageNumber = details.newPageNumber;
-          });
-        },
-        onZoomLevelChanged: (PdfZoomDetails details) {
-          setState(() {
-            _zoomLevel = details.newZoomLevel;
-          });
-        },
-        onTextSelectionChanged: (PdfTextSelectionChangedDetails details) {
-          setState(() {
-            _textSelectionDetails = details;
-            _canShowScrollHead = details.selectedText?.isNotEmpty ?? false;
-          });
-        },
-      );
-    } else {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline, size: 64, color: Colors.red),
-            SizedBox(height: 16),
-            Text('No PDF data available'),
-          ],
-        ),
-      );
-    }
+// Data models for annotations and notes
+class PdfAnnotation {
+  final String id;
+  final String text;
+  final Rect bounds;
+  final int pageNumber;
+  final Color color;
+  final DateTime timestamp;
+
+  PdfAnnotation({
+    required this.id,
+    required this.text,
+    required this.bounds,
+    required this.pageNumber,
+    required this.color,
+    required this.timestamp,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'text': text,
+      'bounds': {
+        'left': bounds.left,
+        'top': bounds.top,
+        'right': bounds.right,
+        'bottom': bounds.bottom,
+      },
+      'pageNumber': pageNumber,
+      'color': color.value,
+      'timestamp': timestamp.toIso8601String(),
+    };
+  }
+
+  factory PdfAnnotation.fromJson(Map<String, dynamic> json) {
+    return PdfAnnotation(
+      id: json['id']?.toString() ?? '',
+      text: json['text']?.toString() ?? '',
+      bounds: json['bounds'] != null ? Rect.fromLTRB(
+        (json['bounds']['left'] ?? 0.0).toDouble(),
+        (json['bounds']['top'] ?? 0.0).toDouble(),
+        (json['bounds']['right'] ?? 0.0).toDouble(),
+        (json['bounds']['bottom'] ?? 0.0).toDouble(),
+      ) : Rect.zero,
+      pageNumber: json['pageNumber'] ?? 1,
+      color: Color(json['color'] ?? Colors.yellow.value),
+      timestamp: json['timestamp'] != null 
+        ? DateTime.parse(json['timestamp'])
+        : DateTime.now(),
+    );
+  }
+}
+
+class PdfNote {
+  final String id;
+  final String text;
+  final double x;
+  final double y;
+  final int pageNumber;
+  final Color color;
+  final DateTime timestamp;
+
+  PdfNote({
+    required this.id,
+    required this.text,
+    required this.x,
+    required this.y,
+    required this.pageNumber,
+    required this.color,
+    required this.timestamp,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'text': text,
+      'x': x,
+      'y': y,
+      'pageNumber': pageNumber,
+      'color': color.value,
+      'timestamp': timestamp.toIso8601String(),
+    };
+  }
+
+  factory PdfNote.fromJson(Map<String, dynamic> json) {
+    return PdfNote(
+      id: json['id']?.toString() ?? '',
+      text: json['text']?.toString() ?? '',
+      x: (json['x'] ?? 0.0).toDouble(),
+      y: (json['y'] ?? 0.0).toDouble(),
+      pageNumber: json['pageNumber'] ?? 1,
+      color: Color(json['color'] ?? Colors.yellow.value),
+      timestamp: json['timestamp'] != null 
+        ? DateTime.parse(json['timestamp'])
+        : DateTime.now(),
+    );
   }
 } 

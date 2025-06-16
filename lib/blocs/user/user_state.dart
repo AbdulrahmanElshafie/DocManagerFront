@@ -16,13 +16,8 @@ class UserLoading extends UserState {
   const UserLoading();
 }
 
-class UsersLoaded extends UserState {
-  final List<User> users;
-  
-  const UsersLoaded(this.users);
-  
-  @override
-  List<Object?> get props => [users];
+class UsersLoading extends UserState {
+  const UsersLoading();
 }
 
 class UserLoaded extends UserState {
@@ -32,6 +27,15 @@ class UserLoaded extends UserState {
   
   @override
   List<Object?> get props => [user];
+}
+
+class UsersLoaded extends UserState {
+  final List<User> users;
+  
+  const UsersLoaded(this.users);
+  
+  @override
+  List<Object?> get props => [users];
 }
 
 class UserCreated extends UserState {
@@ -61,10 +65,19 @@ class UserDeleted extends UserState {
   List<Object?> get props => [result];
 }
 
-class UserOperationSuccess extends UserState {
+class PasswordResetSuccess extends UserState {
+  final Map<String, dynamic> result;
+  
+  const PasswordResetSuccess(this.result);
+  
+  @override
+  List<Object?> get props => [result];
+}
+
+class UserSuccess extends UserState {
   final String message;
   
-  const UserOperationSuccess(this.message);
+  const UserSuccess(this.message);
   
   @override
   List<Object?> get props => [message];

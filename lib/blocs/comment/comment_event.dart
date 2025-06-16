@@ -1,5 +1,4 @@
 import 'package:equatable/equatable.dart';
-import 'package:doc_manager/models/comment.dart';
 
 abstract class CommentEvent extends Equatable {
   const CommentEvent();

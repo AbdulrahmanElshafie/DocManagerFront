@@ -58,6 +58,23 @@ class AddDocument extends DocumentEvent {
   List<Object?> get props => [folderId, file, name];
 }
 
+class AddDocumentFromBytes extends DocumentEvent {
+  final String? folderId;
+  final List<int> fileBytes;
+  final String fileName;
+  final String name;
+  
+  const AddDocumentFromBytes({
+    this.folderId, 
+    required this.fileBytes,
+    required this.fileName,
+    required this.name
+  });
+  
+  @override
+  List<Object?> get props => [folderId, fileBytes, fileName, name];
+}
+
 class UpdateDocument extends DocumentEvent {
   final String id;
   final String? folderId;
