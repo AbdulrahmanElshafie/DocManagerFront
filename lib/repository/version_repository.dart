@@ -11,7 +11,7 @@ class VersionRepository {
     final response = await _apiService.post(API.documentRevisions, {
     }, {
       'doc_id': documentId,
-      'version_id': versionId
+      // 'version_id': versionId
     });
     return Document.fromJson(response);
   }

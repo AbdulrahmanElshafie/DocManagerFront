@@ -51,6 +51,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   bool _isLoading = false;
   String? _errorMessage;
 
+  // Resizable details panel width
+  double _detailsPanelWidth = 400.0;
+  final double _minDetailsPanelWidth = 300.0;
+  final double _maxDetailsPanelWidth = 500.0;
+
   @override
   void initState() {
     super.initState();
@@ -180,13 +185,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             child: Row(
               children: [
                 Expanded(
-                  flex: 3,
                   child: _buildDocumentsList(),
                 ),
                 if (_selectedDocument != null) ...[
-                  const VerticalDivider(width: 1),
-                  Expanded(
-                    flex: 2,
+                  _buildResizeHandle(),
+                  Container(
+                    width: _detailsPanelWidth,
                     child: _buildDocumentDetails(),
                   ),
                 ],
@@ -228,13 +232,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             child: Row(
               children: [
                 Expanded(
-                  flex: 3,
                   child: _buildDocumentsList(),
                 ),
                 if (_selectedDocument != null) ...[
-                  const VerticalDivider(width: 1),
-                  Expanded(
-                    flex: 4,
+                  _buildResizeHandle(),
+                  Container(
+                    width: _detailsPanelWidth,
                     child: _buildDocumentDetails(),
                   ),
                 ],
@@ -511,6 +514,52 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     );
   }
 
+  Widget _buildResizeHandle() {
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeLeftRight,
+      child: GestureDetector(
+        onPanUpdate: (details) {
+          setState(() {
+            _detailsPanelWidth = (_detailsPanelWidth - details.delta.dx)
+                .clamp(_minDetailsPanelWidth, _maxDetailsPanelWidth);
+          });
+        },
+        child: Container(
+          width: 8,
+          decoration: BoxDecoration(
+            color: Colors.grey.shade300,
+            border: Border(
+              left: BorderSide(color: Colors.grey.shade400, width: 1),
+              right: BorderSide(color: Colors.grey.shade400, width: 1),
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 1,
+                height: 20,
+                color: Colors.grey.shade600,
+              ),
+              const SizedBox(height: 4),
+              Container(
+                width: 1,
+                height: 20,
+                color: Colors.grey.shade600,
+              ),
+              const SizedBox(height: 4),
+              Container(
+                width: 1,
+                height: 20,
+                color: Colors.grey.shade600,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildDocumentDetails() {
     if (_selectedDocument == null) {
       return const Center(
@@ -549,21 +598,39 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                DocumentActions(
-                  document: _selectedDocument!,
-                  onEdit: () => _openDocument(_selectedDocument!),
-                  onDelete: () => _showDeleteConfirmation(_selectedDocument!),
-                ),
-                const SizedBox(height: 16),
-                MetadataSection(document: _selectedDocument!),
-                const SizedBox(height: 16),
-                VersionsSection(documentId: _selectedDocument!.id),
-                const SizedBox(height: 16),
-                CommentsSection(documentId: _selectedDocument!.id),
-              ],
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: _detailsPanelWidth,
+                minWidth: _detailsPanelWidth,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: _detailsPanelWidth),
+                    child: DocumentActions(
+                      document: _selectedDocument!,
+                      onEdit: () => _openDocument(_selectedDocument!),
+                      onDelete: () => _showDeleteConfirmation(_selectedDocument!),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: _detailsPanelWidth),
+                    child: MetadataSection(document: _selectedDocument!),
+                  ),
+                  const SizedBox(height: 16),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: _detailsPanelWidth),
+                    child: VersionsSection(documentId: _selectedDocument!.id),
+                  ),
+                  const SizedBox(height: 16),
+                  // ConstrainedBox(
+                  //   constraints: BoxConstraints(maxWidth: _detailsPanelWidth),
+                  //   child: CommentsSection(documentId: _selectedDocument!.id),
+                  // ),
+                ],
+              ),
             ),
           ),
         ),
