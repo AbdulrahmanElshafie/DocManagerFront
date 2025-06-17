@@ -130,7 +130,7 @@ class _VersionsSectionState extends State<VersionsSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
+        Column(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Row(
@@ -153,7 +153,7 @@ class _VersionsSectionState extends State<VersionsSection> {
                   onPressed: _loadVersions,
                   tooltip: 'Refresh',
                 ),
-                const SizedBox(width: 8),
+                // const SizedBox(width: ),
                 ElevatedButton.icon(
                   icon: const Icon(Icons.add),
                   label: const Text('New Version'),
