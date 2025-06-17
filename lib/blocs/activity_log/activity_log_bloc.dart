@@ -2,6 +2,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:doc_manager/blocs/activity_log/activity_log_event.dart';
 import 'package:doc_manager/blocs/activity_log/activity_log_state.dart';
 import 'package:doc_manager/repository/activity_log_repository.dart';
+import 'package:doc_manager/models/activity_log.dart';
 import 'package:doc_manager/shared/utils/logger.dart';
 
 class ActivityLogBloc extends Bloc<ActivityLogEvent, ActivityLogState> {
@@ -69,7 +70,7 @@ class ActivityLogBloc extends Bloc<ActivityLogEvent, ActivityLogState> {
       emit(const ActivityLogsLoading());
       
       // Load both activity logs and stats simultaneously
-      final futures = await Future.wait([
+      final results = await Future.wait<dynamic>([
         _activityLogRepository.getDocumentActivityLogs(
           event.documentId,
           activityType: event.activityType,
@@ -81,8 +82,8 @@ class ActivityLogBloc extends Bloc<ActivityLogEvent, ActivityLogState> {
         ),
       ]);
       
-      final activityLogs = futures[0] as List<ActivityLog>;
-      final stats = futures[1] as Map<String, dynamic>;
+      final activityLogs = results[0] as List<ActivityLog>;
+      final stats = results[1] as Map<String, dynamic>;
       
       emit(ActivityDataLoaded(
         activityLogs: activityLogs,
