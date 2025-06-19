@@ -4,8 +4,11 @@ import 'package:doc_manager/models/document.dart';
 import 'package:doc_manager/blocs/document/document_bloc.dart';
 import 'package:doc_manager/blocs/document/document_event.dart';
 import 'package:doc_manager/screens/shareable_links_screen.dart';
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html' as html;
+import 'dart:io' as io show File;
 import 'package:share_plus/share_plus.dart';
+import '../shared/utils/file_utils.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class DocumentActions extends StatelessWidget {
   final Document document;
@@ -141,8 +144,11 @@ class DocumentActions extends StatelessWidget {
         Share.share(document.filePath!, subject: document.name);
       } else {
         // Share the local file
-        final file = File(document.filePath!);
-        if (file.existsSync()) {
+        io.File? file;
+        if (!kIsWeb) {
+          file = io.File(document.filePath!);
+        }
+        if (file != null && FileUtils.existsSync(file)) {
           Share.shareXFiles([XFile(document.filePath!)], subject: document.name);
         } else {
           ScaffoldMessenger.of(context).showSnackBar(

@@ -6,9 +6,14 @@ import 'package:doc_manager/blocs/activity_log/activity_log_bloc.dart';
 import 'package:doc_manager/blocs/activity_log/activity_log_event.dart';
 import 'package:doc_manager/blocs/activity_log/activity_log_state.dart';
 import 'package:doc_manager/shared/network/api_service.dart';
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html';
+import 'dart:io' as io show File;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:intl/intl.dart';
+import '../shared/utils/file_utils.dart';
+
+// Platform-specific File class handling
+typedef PlatformFile = File;
 
 class MetadataSection extends StatefulWidget {
   final Document document;
@@ -85,6 +90,26 @@ class _MetadataSectionState extends State<MetadataSection> {
           _documentContent = 'Unable to load document preview';
           _isLoadingContent = false;
         });
+      }
+    }
+  }
+
+  // Helper method to check file accessibility
+  bool _isFileAccessible(String filePath) {
+    if (kIsWeb) {
+      // On web, we can't check file accessibility, so just return true
+      return true;
+    } else {
+      try {
+        // Check if File class is available and file exists
+        io.File? platformFile;
+        if (!kIsWeb) {
+          platformFile = io.File(filePath);
+        }
+        return platformFile != null && FileUtils.existsSync(platformFile);
+      } catch (e) {
+        // If File class is not available or any error occurs
+        return false;
       }
     }
   }
@@ -343,7 +368,7 @@ class _MetadataSectionState extends State<MetadataSection> {
               !kIsWeb)
             _buildInfoRow(
               'Status', 
-              File(widget.document.filePath!).existsSync() ? 'Accessible' : 'Not Found'
+              _isFileAccessible(widget.document.filePath!) ? 'Accessible' : 'Not Found'
             ),
         ],
       ),

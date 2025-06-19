@@ -13,9 +13,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:file_picker/file_picker.dart';
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html' as html;
+import 'dart:io' as io show File;
 import 'dart:async';
 import 'dart:developer' as developer;
+import '../shared/utils/file_utils.dart';
 import 'package:path/path.dart' as p;
 
 class FoldersScreen extends StatefulWidget {
@@ -44,7 +46,7 @@ class _FoldersScreenState extends State<FoldersScreen> {
   bool _isGridView = true; // Add view mode state
   
   // For file upload
-  File? _selectedFile;
+  io.File? _selectedFile;
   String? _selectedFileName;
   bool _isUploadingDocument = false;
   
@@ -266,10 +268,20 @@ class _FoldersScreenState extends State<FoldersScreen> {
                             }
                             
                             setState(() {
-                              _selectedFile = File(pickedFile.path!);
-                              _selectedFileBytes = null;
-                              developer.log('Selected file path: ${_selectedFile!.path}', name: 'FoldersScreen');
-                              developer.log('File exists: ${_selectedFile!.existsSync()}', name: 'FoldersScreen');
+                              if (!kIsWeb) {
+                                io.File? newSelectedFile;
+                                if (!kIsWeb) {
+                                  newSelectedFile = io.File(pickedFile.path!);
+                                }
+                                _selectedFile = newSelectedFile;
+                                _selectedFileBytes = null;
+                                developer.log('Selected file path: ${FileUtils.getFilePath(_selectedFile)}', name: 'FoldersScreen');
+                                developer.log('File exists: ${FileUtils.existsSync(_selectedFile!)}', name: 'FoldersScreen');
+                              } else {
+                                _selectedFile = null;
+                                _selectedFileBytes = null;
+                                developer.log('Web platform: file operations not supported', name: 'FoldersScreen');
+                              }
                               
                               _selectedFileName = pickedFile.name;
                               _documentNameController.text = pickedFile.name;
@@ -309,7 +321,7 @@ class _FoldersScreenState extends State<FoldersScreen> {
                         children: [
                           Text('Selected: $_selectedFileName'),
                           if (_selectedFile != null) 
-                            Text('File size: ${(_selectedFile!.lengthSync() / 1024).round()} KB'),
+                            Text('File size: ${(FileUtils.lengthSync(_selectedFile!) / 1024).round()} KB'),
                         ],
                       ),
                     ),
@@ -458,14 +470,14 @@ class _FoldersScreenState extends State<FoldersScreen> {
                           ));
                         } else if (!kIsWeb && _selectedFile != null) {
                           developer.log(
-                            'Uploading document file: ${_selectedFile!.path}, ' +
+                            'Uploading document file: ${FileUtils.getFilePath(_selectedFile) ?? "unknown_path"}, ' +
                             'name: ${_documentNameController.text}, ' +
                             'folderId: ${widget.parentFolderId ?? "root"}', 
                             name: 'FoldersScreen'
                           );
                           
                           // Check if file exists and is readable
-                          if (!_selectedFile!.existsSync()) {
+                          if (!FileUtils.existsSync(_selectedFile!)) {
                             throw Exception('Selected file does not exist');
                           }
                           

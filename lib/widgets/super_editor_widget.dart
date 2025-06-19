@@ -7,6 +7,7 @@ import '../models/document.dart' as doc_model;
 import '../shared/network/api_service.dart';
 import '../shared/services/websocket_service.dart';
 import '../shared/utils/logger.dart';
+import '../shared/utils/file_utils.dart';
 
 class SuperEditorWidget extends StatefulWidget {
   final doc_model.Document document;
@@ -152,7 +153,8 @@ class _SuperEditorWidgetState extends State<SuperEditorWidget> {
       String content = widget.initialContent ?? '';
       
       // Check if document has an associated file
-      _isDocumentFileCreated = widget.document.file != null && widget.document.file!.path.isNotEmpty;
+      _isDocumentFileCreated = widget.document.file != null && 
+          (FileUtils.getFilePath(widget.document.file)?.isNotEmpty ?? false);
       
       if (content.isEmpty && _isDocumentFileCreated) {
         // Load content from backend

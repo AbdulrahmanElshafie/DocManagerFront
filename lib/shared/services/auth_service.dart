@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:developer' as developer;
-import 'dart:io';
 import 'package:doc_manager/blocs/user/user_bloc.dart';
 import 'package:doc_manager/blocs/user/user_event.dart';
 import 'package:doc_manager/models/user.dart';
@@ -9,7 +8,10 @@ import 'package:doc_manager/shared/services/secure_storage_service.dart';
 import 'package:doc_manager/shared/network/api.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/material.dart'; // Required for BuildContext
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
+import 'auth_io.dart'
+  if (dart.library.html) 'auth_web.dart';
 
 class AuthService {
   final UserRepository _userRepository;
@@ -88,7 +90,7 @@ class AuthService {
       developer.log('Failed to get current user: $e', name: 'AuthService');
       
       // If network error, try to use offline mode
-      if (e is SocketException || e is http.ClientException) {
+      if (isNetworkError(e)) {
         enableOfflineMode();
         return User(
           id: 1,
@@ -127,8 +129,9 @@ class AuthService {
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        final String accessToken = responseData['access'];
-        final String refreshToken = responseData['refresh'];
+        // Normalize token keys - handle both possible field names
+        final String accessToken = responseData['token'] ?? responseData['access'];
+        final String refreshToken = responseData['refresh_token'] ?? responseData['refresh'];
         
         // Store tokens securely
         await secureStorageService.writeSecureData('authToken', accessToken);
@@ -162,8 +165,8 @@ class AuthService {
     } catch (e) {
       developer.log('Login failed: $e', name: 'AuthService');
       
-      // If it's a network error, switch to offline mode
-      if (e is SocketException || e is http.ClientException || e is HttpException) {
+      // If it's a network error, try to use offline mode
+      if (isNetworkError(e)) {
         developer.log('Network error detected, switching to offline mode', name: 'AuthService');
         enableOfflineMode();
         await secureStorageService.writeSecureData('authToken', 'mock_token');
@@ -195,7 +198,8 @@ class AuthService {
         }),
       );
       
-      if (response.statusCode == 201) {
+      // Accept both 200 OK and 201 Created status codes
+      if (response.statusCode == 200 || response.statusCode == 201) {
         // Registration successful, now login
         return await login(username, password);
       } else {
@@ -294,8 +298,8 @@ class AuthService {
     } catch (e) {
       developer.log('Token refresh failed: $e', name: 'AuthService');
       
-      // If network error, switch to offline mode
-      if (e is SocketException || e is http.ClientException || e is HttpException) {
+      // If network error, try to use offline mode
+      if (isNetworkError(e)) {
         developer.log('Network error during token refresh, switching to offline mode', name: 'AuthService');
         enableOfflineMode();
         const mockToken = 'mock_refreshed_token';
@@ -306,4 +310,5 @@ class AuthService {
       return null;
     }
   }
+
 } 

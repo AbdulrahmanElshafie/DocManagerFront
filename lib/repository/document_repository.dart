@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html' as html;
 import 'package:doc_manager/shared/network/api_service.dart';
 import 'package:doc_manager/shared/network/api.dart';
 import 'package:doc_manager/models/document.dart';
@@ -8,12 +8,16 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
 import 'package:path/path.dart' as path;
 import 'package:http/http.dart' as http;
+import '../shared/utils/file_utils.dart';
+
+// Platform-specific File class handling
+import 'dart:io' as io show File;
 
 class DocumentRepository {
   final ApiService _apiService = ApiService();
 
   Future<Document> createDocument(
-      String folderId, File file, String name) async {
+      String folderId, io.File file, String name) async {
     try {
       // Check if running on web platform
       if (kIsWeb) {
@@ -30,7 +34,8 @@ class DocumentRepository {
       }
       
       // Check if file extension is allowed
-      final fileExt = path.extension(file.path).toLowerCase();
+      final filePath = FileUtils.getFilePath(file) ?? 'unknown';
+      final fileExt = path.extension(filePath).toLowerCase();
       if (fileExt != '.pdf' && fileExt != '.csv' && fileExt != '.docx') {
         throw Exception('Only PDF, CSV, and DOCX files are supported.');
       }
@@ -38,31 +43,48 @@ class DocumentRepository {
       // Verify file exists and is readable
       bool fileExists = false;
       try {
-        fileExists = file.existsSync();
+        fileExists = FileUtils.existsSync(file);
       } catch (e) {
         developer.log('Error checking if file exists: $e', name: 'DocumentRepository');
       }
       
       if (!fileExists) {
-        throw Exception('File does not exist at path: ${file.path}');
+        throw Exception('File does not exist at path: $filePath');
       }
       
       // Get file stats
-      final fileSize = await file.length();
-      final fileStat = await file.stat();
+      final fileSize = await FileUtils.getFileSize(file);
       
       // Log the file information
-      developer.log('Creating document from file: ${file.path} with name: $name', name: 'DocumentRepository');
-      developer.log('File exists: ${file.existsSync()}', name: 'DocumentRepository');
-      developer.log('File size: $fileSize bytes, Last modified: ${fileStat.modified}', name: 'DocumentRepository');
+      developer.log('Creating document from file: $filePath with name: $name', name: 'DocumentRepository');
+      developer.log('File exists: ${FileUtils.existsSync(file)}', name: 'DocumentRepository');
+      developer.log('File size: $fileSize bytes', name: 'DocumentRepository');
       
       // If file is too large (> 10MB), make a copy with reduced size if possible
       if (fileSize > 10 * 1024 * 1024) {
         developer.log('File is large (${fileSize / (1024 * 1024)} MB), might cause upload issues', name: 'DocumentRepository');
       }
       
-      // Try to create a local copy in temp directory
-      Directory? tempDir;
+      // Try to create a local copy in temp directory (only on non-web platforms)
+      if (kIsWeb) {
+        developer.log('Web platform detected, skipping temp directory operations', name: 'DocumentRepository');
+        final response = await _apiService.uploadFile(
+          API.document, 
+          file,
+          {
+            'folder': folderId,
+            'name': name,
+          }
+        );
+        
+        if (response == null || response.isEmpty) {
+          throw Exception('Empty response received when creating document');
+        }
+        
+        return Document.fromJson(response);
+      }
+      
+      dynamic tempDir;
       try {
         tempDir = await getTemporaryDirectory();
       } catch (e) {
@@ -84,32 +106,39 @@ class DocumentRepository {
         return Document.fromJson(response);
       }
       
-      final fileName = path.basename(file.path);
-      final tempFile = File('${tempDir.path}/$fileName');
+      final fileName = FileUtils.getFileName(file);
+      io.File? tempFile;
+      if (!kIsWeb) {
+        tempFile = io.File('${tempDir.path}/$fileName');
+      }
       
       try {
-        // Copy file to temp directory to avoid path issues
-        await file.copy(tempFile.path);
-        developer.log('Created temp copy at: ${tempFile.path}', name: 'DocumentRepository');
+        if (tempFile != null) {
+          // Copy file to temp directory to avoid path issues
+          await FileUtils.copyFile(file, FileUtils.getFilePath(tempFile)!);
+          developer.log('Created temp copy at: ${FileUtils.getFilePath(tempFile)}', name: 'DocumentRepository');
+          
+          // Use the temp file for upload
+          final response = await _apiService.uploadFile(
+            API.document, 
+            tempFile,
+            {
+              'folder': folderId,
+              'name': name,
+            }
+          );
         
-        // Use the temp file for upload
-        final response = await _apiService.uploadFile(
-          API.document, 
-          tempFile,
-          {
-            'folder': folderId,
-            'name': name,
+          if (response == null || response.isEmpty) {
+            throw Exception('Empty response received when creating document');
           }
-        );
-        
-        if (response == null || response.isEmpty) {
-          throw Exception('Empty response received when creating document');
+          
+          // Log successful upload
+          developer.log('Document created successfully with response: $response', name: 'DocumentRepository');
+          
+          return Document.fromJson(response);
+        } else {
+          throw Exception('Cannot create temporary file on web platform');
         }
-        
-        // Log successful upload
-        developer.log('Document created successfully with response: $response', name: 'DocumentRepository');
-        
-        return Document.fromJson(response);
       } catch (e) {
         developer.log('Error uploading temp file: $e', name: 'DocumentRepository');
         
@@ -157,18 +186,8 @@ class DocumentRepository {
   }
 
   // This method creates a document with content in the appropriate supported format
-  Future<Document> createContentDocument({
-    required String name,
-    String? folderId,
-    String? content
-  }) async {
+  Future<Document> createContentDocument(String? folderId, String name, String content) async {
     try {
-      if (content == null || content.isEmpty) {
-        throw Exception('Content cannot be empty');
-      }
-
-      developer.log('Creating content document name: $name', name: 'DocumentRepository');
-      
       // Use PDF as default format
       String fileExtension = '.pdf';
       DocumentType documentType = DocumentType.pdf;
@@ -192,32 +211,39 @@ class DocumentRepository {
         try {
           final directory = await getTemporaryDirectory();
           final fileName = name.contains('.') ? name : '$name$fileExtension';
-          final file = File('${directory.path}/$fileName');
+          io.File? file;
+          if (!kIsWeb) {
+            file = io.File('${directory.path}/$fileName');
+          }
           
-          // Write content to the file
-          await file.writeAsString(content);
-          
-          // Log file creation
-          developer.log('Created temporary file at: ${file.path}', name: 'DocumentRepository');
-          developer.log('File exists: ${file.existsSync()}', name: 'DocumentRepository');
-          developer.log('File size: ${await file.length()} bytes', name: 'DocumentRepository');
-          
-          try {
-            return await createDocument(folderId ?? '', file, name);
-          } catch (e) {
-            developer.log('Error in createDocument: $e', name: 'DocumentRepository');
+          if (file != null) {
+            // Write content to the file
+            await FileUtils.writeAsString(file, content);
             
-            // Fall back to direct API call if createDocument fails
-            final map = {
-              'folder': folderId,
-              'name': name,
-              'content': content,
-              'type': fileExtension.replaceAll('.', '')
-            };
+            // Log file creation
+            developer.log('Created temporary file at: ${FileUtils.getFilePath(file)}', name: 'DocumentRepository');
+            developer.log('File exists: ${FileUtils.existsSync(file)}', name: 'DocumentRepository');
+            developer.log('File size: ${await FileUtils.getFileSize(file)} bytes', name: 'DocumentRepository');
             
-            developer.log('Falling back to direct API call with data: $map', name: 'DocumentRepository');
-            final response = await _apiService.post(API.document, map, {});
-            return Document.fromJson(response);
+            try {
+              return await createDocument(folderId ?? '', file, name);
+            } catch (e) {
+              developer.log('Error in createDocument: $e', name: 'DocumentRepository');
+              
+              // Fall back to direct API call if createDocument fails
+              final map = {
+                'folder': folderId,
+                'name': name,
+                'content': content,
+                'type': fileExtension.replaceAll('.', '')
+              };
+              
+              developer.log('Falling back to direct API call with data: $map', name: 'DocumentRepository');
+              final response = await _apiService.post(API.document, map, {});
+              return Document.fromJson(response);
+            }
+          } else {
+            throw Exception('Cannot create document file on web platform');
           }
         } catch (e) {
           developer.log('Error creating document with file: $e', name: 'DocumentRepository');
@@ -294,19 +320,20 @@ class DocumentRepository {
   }
 
   Future<Map<String, dynamic>> updateDocument(
-      String id, String folderId, File? file, String name, {String? content}) async {
+      String id, String folderId, io.File? file, String name, {String? content}) async {
     try {
       // Case 1: File is provided directly
       if (file != null) {
         // Check file extension
-        final fileExt = path.extension(file.path).toLowerCase();
+        final filePath = FileUtils.getFilePath(file) ?? 'unknown';
+        final fileExt = path.extension(filePath).toLowerCase();
         if (fileExt != '.pdf' && fileExt != '.csv' && fileExt != '.docx') {
           throw Exception('Only PDF, CSV, and DOCX files are supported.');
         }
         
         // Log file information
-        developer.log('Updating document with file: ${file.path} with name: $name', name: 'DocumentRepository');
-        developer.log('File exists: ${file.existsSync()}', name: 'DocumentRepository');
+        developer.log('Updating document with file: $filePath with name: $name', name: 'DocumentRepository');
+        developer.log('File exists: ${FileUtils.existsSync(file)}', name: 'DocumentRepository');
         
         return await _apiService.updateFile(
           API.document,
@@ -331,22 +358,30 @@ class DocumentRepository {
         }
         
         final fileName = name.contains('.') ? name : '$name$fileExtension';
-        final tempFile = File('${directory.path}/$fileName');
-        await tempFile.writeAsString(content);
+        io.File? tempFile;
+        if (!kIsWeb) {
+          tempFile = io.File('${directory.path}/$fileName');
+        }
         
-        // Log file creation
-        developer.log('Created temporary file for update at: ${tempFile.path}', name: 'DocumentRepository');
-        developer.log('File exists: ${tempFile.existsSync()}', name: 'DocumentRepository');
-        
-        return await _apiService.updateFile(
-          API.document,
-          id,
-          tempFile,
-          {
-            'folder': folderId,
-            'name': name,
-          }
-        );
+        if (tempFile != null) {
+          await FileUtils.writeAsString(tempFile, content);
+          
+          // Log file creation
+          developer.log('Created temporary file for update at: ${FileUtils.getFilePath(tempFile)}', name: 'DocumentRepository');
+          developer.log('File exists: ${FileUtils.existsSync(tempFile)}', name: 'DocumentRepository');
+          
+          return await _apiService.updateFile(
+            API.document,
+            id,
+            tempFile,
+            {
+              'folder': folderId,
+              'name': name,
+            }
+          );
+        } else {
+          throw Exception('Cannot create temporary file on web platform');
+        }
       }
       // Case 3: Web platform with content
       else if (kIsWeb && content != null) {

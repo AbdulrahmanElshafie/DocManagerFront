@@ -1,6 +1,8 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html';
+import 'dart:io' as io show File;
 import 'package:doc_manager/models/document.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import '../shared/utils/file_utils.dart';
 
 class Version extends Document {
   final String versionId;
@@ -29,7 +31,7 @@ class Version extends Document {
   });
 
   factory Version.fromJson(Map<String, dynamic> json) {
-    File? fileObj;
+    io.File? fileObj;
     String? filePathStr;
     
     if (json['file'] != null) {
@@ -39,7 +41,11 @@ class Version extends Document {
       // Only create a File object if we're not on web and path is valid
       if (!kIsWeb && filePathStr != null && filePathStr.isNotEmpty) {
         try {
-          fileObj = File(filePathStr);
+          io.File? newFileObj;
+          if (!kIsWeb) {
+            newFileObj = io.File(filePathStr);
+          }
+          fileObj = newFileObj;
         } catch (e) {
           print('Error creating File object: $e');
         }
@@ -109,7 +115,7 @@ class Version extends Document {
   Version copyWith({
     String? id,
     String? name,
-    File? file,
+    io.File? file,
     String? filePath,
     DocumentType? type,
     String? folderId,

@@ -51,9 +51,9 @@ class DocumentBloc extends Bloc<DocumentEvent, DocumentState> {
     try {
       emit(const DocumentsLoading());
       final document = await _documentRepository.createContentDocument(
-        name: event.name,
-        folderId: event.folderId,
-        content: event.content
+        event.folderId,
+        event.name,
+        event.content ?? ''
       );
       
       // Re-fetch the documents to update the list

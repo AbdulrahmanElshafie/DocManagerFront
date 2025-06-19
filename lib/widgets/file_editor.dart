@@ -1,4 +1,5 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html' as html;
+import 'dart:io' as io show File;
 import 'dart:typed_data';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:path/path.dart' as path;
 import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
+import '../shared/utils/file_utils.dart';
 import '../models/document.dart';
 import '../shared/utils/logger.dart';
 import '../shared/network/api_service.dart';
@@ -17,9 +19,9 @@ import 'version_management_widget.dart';
 
 class FileEditor extends StatefulWidget {
   final Document? document;
-  final File? file;
+  final io.File? file;
   final Function(String content, DocumentType type)? onSave;
-  final Function(File file)? onSaveFile;
+  final Function(io.File file)? onSaveFile;
 
   const FileEditor({
     super.key,
@@ -36,7 +38,7 @@ class FileEditor extends StatefulWidget {
 class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
   DocumentType? _fileType;
   String? _fileName;
-  File? _currentFile;
+  io.File? _currentFile;
   String? _fileUrl; // For remote files
   bool _isRemoteFile = false;
   bool _isLoading = true;
@@ -97,7 +99,7 @@ class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
         _fileType = widget.document!.type;
         
         // Check if the file path is a URL or local path
-        final filePath = widget.document!.filePath ?? widget.document!.file?.path;
+        final filePath = widget.document!.filePath ?? FileUtils.getFilePath(widget.document!.file);
         
         if (_isUrl(filePath)) {
           _isRemoteFile = true;
@@ -114,7 +116,15 @@ class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
       } else if (widget.file != null) {
         _isRemoteFile = false;
         _currentFile = widget.file;
-        _fileName = path.basename(widget.file!.path);
+        try {
+          if (kIsWeb) {
+            _fileName = 'web_file';
+          } else {
+            _fileName = FileUtils.getFileName(widget.file!);
+          }
+        } catch (e) {
+          _fileName = 'unknown_file';
+        }
         _fileType = _inferFileType(_fileName!);
       } else {
         throw Exception('No document or file provided');
@@ -219,7 +229,11 @@ class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
       } else if (_isRemoteFile && _fileBytes != null) {
         csvText = utf8.decode(_fileBytes!);
       } else if (_currentFile != null) {
-        csvText = await _currentFile!.readAsString();
+        if (kIsWeb) {
+          throw UnsupportedError('Local file reading not supported on web. Use remote files instead.');
+        } else {
+          csvText = await FileUtils.readAsString(_currentFile!);
+        }
       } else {
         throw Exception('No file data available');
       }
@@ -244,9 +258,13 @@ class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
         }
         LoggerUtil.info('PDF loaded from remote URL, size: ${_fileBytes?.length ?? 0} bytes');
       } else if (_currentFile != null) {
-        // For local files, read as bytes
-        _fileBytes = await _currentFile!.readAsBytes();
-        LoggerUtil.info('PDF loaded from local file, size: ${_fileBytes!.length} bytes');
+        // For local files, read as bytes (only on non-web platforms)
+        if (kIsWeb) {
+          throw UnsupportedError('Local file reading not supported on web. Use remote files instead.');
+        } else {
+          _fileBytes = await FileUtils.readAsBytes(_currentFile!);
+          LoggerUtil.info('PDF loaded from local file, size: ${_fileBytes!.length} bytes');
+        }
       } else {
         throw Exception('No PDF data available');
       }
@@ -340,7 +358,7 @@ class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
         );
       } else if (_currentFile != null) {
         // Save to local file
-        await _currentFile!.writeAsString(csvContent);
+        await FileUtils.writeAsString(_currentFile!, csvContent);
       }
 
       if (mounted) {

@@ -1,8 +1,10 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html' as html;
+import 'dart:io' as io show File;
 import 'package:equatable/equatable.dart';
 import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path/path.dart' as path;
+import '../shared/utils/file_utils.dart';
 
 enum DocumentType {
   pdf,
@@ -14,7 +16,7 @@ enum DocumentType {
 class Document extends Equatable {
   final String id;
   final String name;
-  late File? file;
+  late io.File? file;
   final String? filePath;
   final DocumentType type;
   final String folderId;
@@ -39,7 +41,7 @@ class Document extends Equatable {
   factory Document.fromJson(Map<String, dynamic> json) {
     developer.log('Parsing document JSON: $json', name: 'Document.fromJson');
     
-    File? fileObj;
+    io.File? fileObj;
     String? filePathStr;
 
     if (json['file'] != null) {
@@ -51,21 +53,40 @@ class Document extends Equatable {
         // Only create a File object if we're not on web and path is valid
         if (!kIsWeb && filePathStr != null && filePathStr.isNotEmpty) {
           try {
-            // Normalize the file path for Windows
-            if (Platform.isWindows) {
-              filePathStr = filePathStr.replaceAll('\\', '/');
+            // Normalize the file path for Windows (only on non-web platforms)
+            try {
+              if (!kIsWeb && filePathStr.contains('\\')) {
+                filePathStr = filePathStr.replaceAll('\\', '/');
+              }
+            } catch (e) {
+              developer.log('Error normalizing file path: $e', name: 'Document.fromJson');
             }
             
             // Ensure the path isn't just the string "path" which can happen in error cases
-            if (filePathStr == "path" || filePathStr.trim().isEmpty) {
+            if (filePathStr == "path" || (filePathStr?.trim().isEmpty ?? true)) {
               developer.log('Invalid file path received: $filePathStr', name: 'Document.fromJson');
               filePathStr = null;
             } else {
-              fileObj = File(filePathStr);
-              // Check if file exists to validate path - but don't throw if it doesn't
-              if (!fileObj.existsSync()) {
-                developer.log('File does not exist at path: $filePathStr', name: 'Document.fromJson');
-                // We'll still keep the fileObj and path, as it might be created later
+              // Create file object - web version needs different handling
+              if (kIsWeb) {
+                // For web, we'll store path but not create File object
+                developer.log('Web platform: storing file path without File object', name: 'Document.fromJson');
+              } else {
+                try {
+                  io.File? newFileObj;
+                  if (!kIsWeb) {
+                    newFileObj = io.File(filePathStr!);
+                  }
+                  fileObj = newFileObj;
+                  // Check if file exists to validate path - but don't throw if it doesn't
+                  if (fileObj != null && !FileUtils.existsSync(fileObj)) {
+                    developer.log('File does not exist at path: $filePathStr', name: 'Document.fromJson');
+                    // We'll still keep the fileObj and path, as it might be created later
+                  }
+                } catch (e) {
+                  developer.log('Error creating File object: $e', name: 'Document.fromJson');
+                  fileObj = null;
+                }
               }
             }
           } catch (e) {
@@ -146,7 +167,7 @@ class Document extends Equatable {
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
-    'file': filePath ?? file?.path,
+    'file': filePath ?? FileUtils.getFilePath(file),
     'owner': ownerId,
     'created_at': createdAt.toIso8601String(),
     'updated_at': updatedAt?.toIso8601String(),
@@ -157,7 +178,7 @@ class Document extends Equatable {
   Document copyWith({
     String? id,
     String? name,
-    File? file,
+    io.File? file,
     String? filePath,
     DocumentType? type,
     String? folderId,

@@ -1,5 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html' as html;
+import 'dart:io' as io show File;
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
@@ -8,6 +9,7 @@ import 'package:doc_manager/shared/services/secure_storage_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'api.dart';
 import 'dart:developer' as developer;
+import '../utils/file_utils.dart';
 
 class ApiService {
   final SecureStorageService _secureStorage = SecureStorageService();
@@ -135,9 +137,61 @@ class ApiService {
     }
   }
 
+  // Helper method to get file information in a platform-agnostic way
+  Map<String, dynamic> _getFileInfo(io.File file) {
+    if (kIsWeb) {
+      // On web, File doesn't have a path property
+      return {
+        'name': 'web_file',
+        'bytes': null,
+      };
+    } else {
+      // On non-web platforms
+      try {
+        final filePath = FileUtils.getFilePath(file);
+        return {
+          'name': FileUtils.getFileName(file),
+          'path': filePath ?? '',
+        };
+      } catch (e) {
+        return {
+          'name': 'unknown_file',
+          'path': '',
+        };
+      }
+    }
+  }
+
+  // Helper method to check if file exists in a platform-agnostic way
+  Future<bool> _fileExists(io.File file) async {
+    if (kIsWeb) {
+      return true; // Assume file exists on web
+    } else {
+      try {
+        return FileUtils.existsSync(file);
+      } catch (e) {
+        return false;
+      }
+    }
+  }
+
+  // Helper method to read file bytes in a platform-agnostic way
+  Future<List<int>> _readFileBytes(io.File file) async {
+    if (kIsWeb) {
+      // On web, we need to handle this differently
+      throw UnsupportedError('File reading from web File not supported. Use uploadFileFromBytes instead.');
+    } else {
+      try {
+        return await FileUtils.readAsBytes(file);
+      } catch (e) {
+        throw Exception('Failed to read file bytes: $e');
+      }
+    }
+  }
+
   Future<Map<String, dynamic>> uploadFile(
       String endpoint, 
-      File file, 
+      io.File file, 
       Map<String, String> fields) async {
     final url = '${API.baseUrl}$endpoint';
     final headers = await _getHeaders(isMultipart: true);
@@ -152,14 +206,14 @@ class ApiService {
     // Add text fields
     request.fields.addAll(fields);
     
-    // Add file - handle differently for web vs other platforms
-    final filename = basename(file.path);
+    final fileInfo = _getFileInfo(file);
+    final filename = fileInfo['name'] as String;
     final mimeType = _getMimeType(filename);
     
     try {
-      // For all platforms, try to read as bytes first
-      if (kIsWeb || await file.exists()) {
-        final bytes = await file.readAsBytes();
+      // Check if file exists and read bytes
+      if (await _fileExists(file)) {
+        final bytes = await _readFileBytes(file);
         final multipartFile = http.MultipartFile.fromBytes(
           'file',
           bytes,
@@ -172,18 +226,20 @@ class ApiService {
                       
         // Add to request
         request.files.add(multipartFile);
-      } else {
-        // Fallback to path-based file upload if reading bytes fails
+      } else if (!kIsWeb) {
+        // Fallback to path-based file upload if reading bytes fails (non-web only)
         developer.log('Error reading file as bytes, falling back to path-based upload', 
                       name: 'ApiService');
         
         request.files.add(
           await http.MultipartFile.fromPath(
             'file', 
-            file.path,
+            fileInfo['path'] as String,
             contentType: mimeType,
           )
         );
+      } else {
+        throw Exception('Cannot upload file on web platform. Use uploadFileFromBytes instead.');
       }
       
       // Send request with timeout
@@ -220,7 +276,7 @@ class ApiService {
         
         // Create minimal content based on file extension
         String fileContent = "This document was created as a fallback.";
-        String fileType = extension(file.path).toLowerCase().replaceAll('.', '');
+        String fileType = extension(filename).toLowerCase().replaceAll('.', '');
         
         // Try to create an empty document with the same name
         try {
@@ -302,7 +358,7 @@ class ApiService {
   Future<Map<String, dynamic>> updateFile(
       String endpoint, 
       String id,
-      File file, 
+      io.File file, 
       Map<String, String> fields) async {
     final url = '${API.baseUrl}$endpoint$id/';
     final headers = await _getHeaders(isMultipart: true);
@@ -317,17 +373,21 @@ class ApiService {
     // Add text fields
     request.fields.addAll(fields);
     
-    // Add file
-    final filename = basename(file.path);
+    final fileInfo = _getFileInfo(file);
+    final filename = fileInfo['name'] as String;
     final mimeType = _getMimeType(filename);
     
-    request.files.add(
-      await http.MultipartFile.fromPath(
-        'file', 
-        file.path,
-        contentType: mimeType,
-      )
-    );
+    if (!kIsWeb && fileInfo['path'] != null) {
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'file', 
+          fileInfo['path'] as String,
+          contentType: mimeType,
+        )
+      );
+    } else {
+      throw UnsupportedError('File update from web File not supported. Use updateFileFromBytes instead.');
+    }
     
     // Send request
     final streamedResponse = await request.send();
@@ -545,6 +605,43 @@ class ApiService {
       return response.bodyBytes;
     } else {
       throw Exception('Failed to download file: ${response.statusCode}');
+    }
+  }
+
+  // Create document with content (used by documents_screen.dart)
+  Future<Map<String, dynamic>> createContentDocument({
+    required String name,
+    String? folderId,
+    String? content,
+  }) async {
+    try {
+      final map = {
+        'folder': folderId,
+        'name': name,
+        'content': content ?? '',
+        'type': _getFileTypeFromName(name),
+      };
+      
+      developer.log('Creating document with data: $map', name: 'ApiService');
+      final response = await post('/manager/document/', map, {});
+      return response;
+    } catch (e) {
+      developer.log('Error in createContentDocument: $e', name: 'ApiService');
+      rethrow;
+    }
+  }
+
+  // Helper method to get file type from name
+  String _getFileTypeFromName(String name) {
+    final extension = name.toLowerCase();
+    if (extension.endsWith('.pdf')) {
+      return 'pdf';
+    } else if (extension.endsWith('.csv')) {
+      return 'csv';
+    } else if (extension.endsWith('.docx')) {
+      return 'docx';
+    } else {
+      return 'pdf'; // Default
     }
   }
 }

@@ -1,8 +1,11 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html' as html;
+import 'dart:io' as io show File;
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:file_picker/file_picker.dart';
+import '../shared/utils/file_utils.dart';
 import 'package:path/path.dart' as path;
 
 import '../models/document.dart';
@@ -734,14 +737,20 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               document.folderId,
             );
           },
-          onSaveFile: (file) {
+          onSaveFile: (file) async {
             // Handle file save operation
-            _apiService.updateDocument(
-              document.id,
-              file.readAsStringSync(),
-              document.name,
-              document.folderId,
-            );
+            try {
+              final content = await FileUtils.readAsString(file);
+              _apiService.updateDocument(
+                document.id,
+                content,
+                document.name,
+                document.folderId,
+              );
+            } catch (e) {
+              // Handle error
+              print('Error reading file: $e');
+            }
           },
         ),
       ),
@@ -843,8 +852,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         allowMultiple: false,
       );
 
-      if (result != null && result.files.single.path != null) {
-        final file = File(result.files.single.path!);
+      if (result != null && result.files.single.path != null && !kIsWeb) {
+        io.File? file;
+        if (!kIsWeb) {
+          file = io.File(result.files.single.path!);
+        }
         final fileName = result.files.single.name;
 
         _apiService.addDocument(
@@ -1160,10 +1172,11 @@ class _CreateDocumentDialogState extends State<_CreateDocumentDialog> {
       // Create initial content based on type
       String initialContent = _getInitialContent(_selectedType);
 
-      _apiService.addDocument(
-        widget.folderId,
-        File(initialContent),
-        fileName,
+      // Use the content-based document creation method instead of File
+      await _apiService.createContentDocument(
+        name: fileName,
+        folderId: widget.folderId,
+        content: initialContent,
       );
 
       Navigator.pop(context);
