@@ -1,5 +1,4 @@
 import 'package:equatable/equatable.dart';
-import 'package:doc_manager/models/folder.dart';
 
 abstract class FolderEvent extends Equatable {
   const FolderEvent();

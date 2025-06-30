@@ -1,22 +1,17 @@
-import 'dart:io' if (dart.library.html) 'dart:html' as html;
 import 'dart:io' as io show File;
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:file_picker/file_picker.dart';
-import '../shared/utils/file_utils.dart';
-import 'package:path/path.dart' as path;
 
 import '../models/document.dart';
-import '../models/folder.dart';
 import '../blocs/document/document_bloc.dart';
-import '../blocs/document/document_event.dart';
 import '../blocs/document/document_state.dart';
 import '../blocs/folder/folder_bloc.dart';
 import '../blocs/folder/folder_event.dart';
 import '../blocs/folder/folder_state.dart';
-import '../widgets/file_editor.dart';
+import '../widgets/unified_document_viewer.dart';
 import '../widgets/document_actions.dart';
 import '../widgets/metadata_section.dart';
 import '../widgets/versions_section.dart';
@@ -39,20 +34,20 @@ class DocumentsScreen extends StatefulWidget {
   State<DocumentsScreen> createState() => _DocumentsScreenState();
 }
 
-class _DocumentsScreenState extends State<DocumentsScreen> {
+class _DocumentsScreenState extends State<DocumentsScreen> with TickerProviderStateMixin {
   final ApiService _apiService = ApiService();
   final TextEditingController _searchController = TextEditingController();
   String? _selectedFolderId;
   Document? _selectedDocument;
-  bool _showCreateDialog = false;
   String _viewMode = 'grid'; // 'grid' or 'list'
   String _sortBy = 'name'; // 'name', 'date', 'type'
   Timer? _searchDebouncer;
+  
+  // Tab controller for document details
+  late TabController _tabController;
 
   List<Document> _documents = [];
   List<Document> _filteredDocuments = [];
-  bool _isLoading = false;
-  String? _errorMessage;
 
   // Resizable details panel width
   double _detailsPanelWidth = 400.0;
@@ -64,6 +59,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     super.initState();
     _selectedFolderId = widget.folderId;
     _searchController.text = widget.initialQuery ?? '';
+    _tabController = TabController(length: 3, vsync: this);
     
     // Initialize filtered documents
     _filteredDocuments = _documents;
@@ -79,6 +75,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   void dispose() {
     _searchController.dispose();
     _searchDebouncer?.cancel();
+    _tabController.dispose();
     super.dispose();
   }
 
@@ -598,43 +595,65 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             ],
           ),
         ),
+        TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(icon: Icon(Icons.info), text: 'Details'),
+            Tab(icon: Icon(Icons.history), text: 'Versions'),
+            Tab(icon: Icon(Icons.comment), text: 'Comments'),
+          ],
+        ),
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: _detailsPanelWidth,
-                minWidth: _detailsPanelWidth,
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              // Details Tab (Actions and Metadata)
+              SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: _detailsPanelWidth,
+                    minWidth: _detailsPanelWidth,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: _detailsPanelWidth),
+                        child: DocumentActions(
+                          document: _selectedDocument!,
+                          onEdit: () => _openDocument(_selectedDocument!),
+                          onDelete: () => _showDeleteConfirmation(_selectedDocument!),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: _detailsPanelWidth),
+                        child: MetadataSection(document: _selectedDocument!),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: _detailsPanelWidth),
-                    child: DocumentActions(
-                      document: _selectedDocument!,
-                      onEdit: () => _openDocument(_selectedDocument!),
-                      onDelete: () => _showDeleteConfirmation(_selectedDocument!),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: _detailsPanelWidth),
-                    child: MetadataSection(document: _selectedDocument!),
-                  ),
-                  const SizedBox(height: 16),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: _detailsPanelWidth),
-                    child: VersionsSection(documentId: _selectedDocument!.id),
-                  ),
-                  const SizedBox(height: 16),
-                  // ConstrainedBox(
-                  //   constraints: BoxConstraints(maxWidth: _detailsPanelWidth),
-                  //   child: CommentsSection(documentId: _selectedDocument!.id),
-                  // ),
-                ],
+              
+              // Versions Tab
+              Container(
+                padding: const EdgeInsets.all(16),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: _detailsPanelWidth),
+                  child: VersionsSection(documentId: _selectedDocument!.id),
+                ),
               ),
-            ),
+              
+              // Comments Tab
+              Container(
+                padding: const EdgeInsets.all(16),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: _detailsPanelWidth),
+                  child: CommentsSection(documentId: _selectedDocument!.id),
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -726,31 +745,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   void _openDocument(Document document) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => FileEditor(
+        builder: (context) => UnifiedDocumentViewer(
           document: document,
-          onSave: (content, type) {
-            // Handle save operation
-            _apiService.updateDocument(
-              document.id,
-              content,
-              document.name,
-              document.folderId,
-            );
-          },
-          onSaveFile: (file) async {
-            // Handle file save operation
-            try {
-              final content = await FileUtils.readAsString(file);
-              _apiService.updateDocument(
-                document.id,
-                content,
-                document.name,
-                document.folderId,
-              );
-            } catch (e) {
-              // Handle error
-              print('Error reading file: $e');
-            }
+          onDocumentUpdated: () {
+            // Refresh the documents list when document is updated
+            _loadDocuments();
           },
         ),
       ),
@@ -877,11 +876,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   Future<void> _loadDocuments() async {
     try {
-      setState(() {
-        _isLoading = true;
-        _errorMessage = null;
-      });
-
       Map<String, dynamic> params = {};
       
       // Add folder filter if specified
@@ -895,17 +889,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       
       setState(() {
         _documents = documents;
-        _isLoading = false;
       });
       
       // Apply current search filter
       _filterDocuments(_searchController.text);
     } catch (e) {
       LoggerUtil.error('Error loading documents: $e');
-      setState(() {
-        _errorMessage = e.toString();
-        _isLoading = false;
-      });
     }
   }
 

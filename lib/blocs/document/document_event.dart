@@ -1,7 +1,5 @@
-import 'dart:io' if (dart.library.html) 'dart:html' as html;
 import 'dart:io' as io show File;
 import 'package:equatable/equatable.dart';
-import 'package:doc_manager/models/document.dart';
 
 abstract class DocumentEvent extends Equatable {
   const DocumentEvent();

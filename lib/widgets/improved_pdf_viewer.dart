@@ -5,7 +5,6 @@ import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import '../models/document.dart';
 import '../shared/utils/logger.dart';
 import '../shared/network/api_service.dart';
-import '../shared/services/websocket_service.dart';
 import 'dart:developer' as developer;
 
 class ImprovedPdfViewer extends StatefulWidget {
@@ -31,15 +30,11 @@ class _ImprovedPdfViewerState extends State<ImprovedPdfViewer> {
   final GlobalKey<SfPdfViewerState> _pdfViewerKey = GlobalKey();
 
   final ApiService _apiService = ApiService();
-  final WebSocketService _webSocketService = WebSocketService();
   
-  // Real-time editing state
-  bool _isConnected = false;
+  // Save state
+  bool _isConnected = true; // Always connected for HTTP API
   String _lastSaveTime = '';
-  StreamSubscription? _connectionSubscription;
-  StreamSubscription? _saveStatusSubscription;
-  StreamSubscription? _errorSubscription;
-  StreamSubscription? _documentUpdateSubscription;
+  bool _isSaving = false;
   
   // Annotation and interaction state
   PdfInteractionMode _interactionMode = PdfInteractionMode.selection;
@@ -72,68 +67,16 @@ class _ImprovedPdfViewerState extends State<ImprovedPdfViewer> {
   void initState() {
     super.initState();
     _pdfController = PdfViewerController();
-    _initializeWebSocket();
     _loadAnnotations();
   }
 
   @override
   void dispose() {
-    _connectionSubscription?.cancel();
-    _saveStatusSubscription?.cancel();
-    _errorSubscription?.cancel();
-    _documentUpdateSubscription?.cancel();
-    _webSocketService.disconnect();
-
     _pdfController.dispose();
     super.dispose();
   }
 
-  Future<void> _initializeWebSocket() async {
-    try {
-      await _webSocketService.connectToDocument(widget.document.id);
-      
-      // Listen to connection state
-      _connectionSubscription = _webSocketService.connectionState.listen((isConnected) {
-        if (mounted) {
-          setState(() {
-            _isConnected = isConnected;
-          });
-        }
-      });
-      
-      // Listen to save status
-      _saveStatusSubscription = _webSocketService.saveStatus.listen((status) {
-        if (mounted) {
-          setState(() {
-            _lastSaveTime = status.timestamp;
-          });
-          
-          if (status.success) {
-            _showSnackBar(
-              status.isAutoSave ? 'Auto-saved' : 'Saved',
-              Colors.green,
-              Icons.check_circle,
-            );
-          } else {
-            _showSnackBar('Save failed', Colors.red, Icons.error);
-          }
-        }
-      });
-      
-      // Listen to errors
-      _errorSubscription = _webSocketService.errors.listen((error) {
-        if (mounted) {
-          _showSnackBar('Connection error: $error', Colors.red, Icons.error);
-        }
-      });
-      
-    } catch (e) {
-      LoggerUtil.error('Failed to setup WebSocket: $e');
-      if (mounted) {
-        _showSnackBar('Failed to connect: $e', Colors.red, Icons.error);
-      }
-    }
-  }
+
 
   void _showSnackBar(String message, Color color, IconData icon) {
     if (mounted) {
@@ -750,7 +693,7 @@ class _ImprovedPdfViewerState extends State<ImprovedPdfViewer> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: note.color.withOpacity(0.8),
+                color: note.color.withValues(alpha: 0.8),
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.white, width: 2),
               ),
@@ -847,17 +790,17 @@ class _ImprovedPdfViewerState extends State<ImprovedPdfViewer> {
             ],
           ),
           Row(
-            children: [
-              Icon(
-                _isConnected ? Icons.wifi : Icons.wifi_off,
-                size: 16,
-                color: _isConnected ? Colors.green : Colors.red,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                _isConnected ? 'Connected' : 'Disconnected',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+                          children: [
+                Icon(
+                  Icons.wifi,
+                  size: 16,
+                  color: Colors.green,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Connected',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               if (_lastSaveTime.isNotEmpty) ...[
                 const SizedBox(width: 16),
                 Text(

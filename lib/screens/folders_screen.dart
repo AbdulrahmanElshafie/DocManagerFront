@@ -8,7 +8,8 @@ import 'package:doc_manager/models/document.dart';
 import 'package:doc_manager/models/folder.dart';
 import 'package:doc_manager/shared/components/responsive_builder.dart';
 import 'package:doc_manager/repository/folder_repository.dart';
-import 'package:doc_manager/widgets/file_editor.dart';
+import 'package:doc_manager/widgets/unified_document_viewer.dart';
+import 'package:doc_manager/shared/network/api_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -618,6 +619,28 @@ class _FoldersScreenState extends State<FoldersScreen> {
     );
   }
 
+  void _uploadFolder() {
+    showDialog(
+      context: context,
+      builder: (context) => _UploadFolderDialog(
+        parentFolderId: widget.parentFolderId,
+        onFolderUploaded: () {
+          _loadContent();
+        },
+      ),
+    );
+  }
+
+  void _shareDocument(Document document) {
+    showDialog(
+      context: context,
+      builder: (context) => _ShareDialog(
+        documentId: document.id,
+        documentName: document.name,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -687,8 +710,11 @@ class _FoldersScreenState extends State<FoldersScreen> {
                 Navigator.push(
                   context, 
                   MaterialPageRoute(
-                    builder: (context) => FileEditor(
+                    builder: (context) => UnifiedDocumentViewer(
                       document: state.document,
+                      onDocumentUpdated: () {
+                        _loadContent();
+                      },
                     ),
                   ),
                 ).then((_) => _loadContent()); // Reload on navigation back
@@ -718,6 +744,13 @@ class _FoldersScreenState extends State<FoldersScreen> {
             onPressed: _createDocument,
             child: const Icon(Icons.add),
             backgroundColor: Colors.blue,
+          ),
+          const SizedBox(height: 16),
+          FloatingActionButton(
+            heroTag: 'uploadFolder',
+            onPressed: _uploadFolder,
+            child: const Icon(Icons.upload),
+            backgroundColor: Colors.green,
           ),
           const SizedBox(height: 16),
           FloatingActionButton(
@@ -1261,7 +1294,13 @@ class _FoldersScreenState extends State<FoldersScreen> {
                     itemBuilder: (context) => [
                       const PopupMenuItem(
                         value: 'delete',
-                        child: Text('Delete'),
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete),
+                            SizedBox(width: 8),
+                            Text('Delete'),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -1302,8 +1341,11 @@ class _FoldersScreenState extends State<FoldersScreen> {
           Navigator.push(
             context, 
             MaterialPageRoute(
-              builder: (context) => FileEditor(
+              builder: (context) => UnifiedDocumentViewer(
                 document: document,
+                onDocumentUpdated: () {
+                  _loadContent();
+                },
               ),
             ),
           ).then((_) => _loadContent()); // Reload on navigation back
@@ -1356,11 +1398,22 @@ class _FoldersScreenState extends State<FoldersScreen> {
                             Navigator.push(
                               context, 
                               MaterialPageRoute(
-                                builder: (context) => FileEditor(
+                                builder: (context) => UnifiedDocumentViewer(
                                   document: document,
+                                  onDocumentUpdated: () {
+                                    _loadContent();
+                                  },
                                 ),
                               ),
                             ).then((_) => _loadContent()); // Reload on navigation back
+                          },
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.share, size: 18),
+                          constraints: const BoxConstraints(maxHeight: 32),
+                          padding: EdgeInsets.zero,
+                          onPressed: () {
+                            _shareDocument(document);
                           },
                         ),
                         IconButton(
@@ -1426,11 +1479,20 @@ class _FoldersScreenState extends State<FoldersScreen> {
               Navigator.push(
                 context, 
                 MaterialPageRoute(
-                  builder: (context) => FileEditor(
+                  builder: (context) => UnifiedDocumentViewer(
                     document: document,
+                    onDocumentUpdated: () {
+                      _loadContent();
+                    },
                   ),
                 ),
               ).then((_) => _loadContent()); // Reload on navigation back
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.share),
+            onPressed: () {
+              _shareDocument(document);
             },
           ),
           IconButton(
@@ -1445,8 +1507,11 @@ class _FoldersScreenState extends State<FoldersScreen> {
         Navigator.push(
           context, 
           MaterialPageRoute(
-            builder: (context) => FileEditor(
+            builder: (context) => UnifiedDocumentViewer(
               document: document,
+              onDocumentUpdated: () {
+                _loadContent();
+              },
             ),
           ),
         ).then((_) => _loadContent()); // Reload on navigation back
@@ -1566,5 +1631,379 @@ class FolderSearchDelegate extends SearchDelegate<String> {
   Widget buildSuggestions(BuildContext context) {
     // Just return empty container for suggestions
     return Container();
+  }
+}
+
+class _UploadFolderDialog extends StatefulWidget {
+  final String? parentFolderId;
+  final VoidCallback onFolderUploaded;
+
+  const _UploadFolderDialog({
+    this.parentFolderId,
+    required this.onFolderUploaded,
+  });
+
+  @override
+  State<_UploadFolderDialog> createState() => _UploadFolderDialogState();
+}
+
+class _UploadFolderDialogState extends State<_UploadFolderDialog> {
+  final ApiService _apiService = ApiService();
+  bool _isUploading = false;
+  io.File? _selectedZipFile;
+  List<int>? _selectedZipBytes;
+  String? _selectedFileName;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Upload Folder'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Instructions:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '1. Compress your folder into a ZIP file\n'
+              '2. Only PDF, DOCX, and CSV files will be imported\n'
+              '3. Folder structure will be preserved\n'
+              '4. Hidden and system files will be ignored',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 16),
+            
+            // File selection button
+            ElevatedButton.icon(
+              onPressed: _isUploading ? null : _selectZipFile,
+              icon: const Icon(Icons.folder_zip),
+              label: const Text('Select ZIP File'),
+            ),
+            
+            if (_selectedFileName != null) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.1),
+                  border: Border.all(color: Colors.green),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle, color: Colors.green),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Selected File:',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          Text(_selectedFileName!),
+                          if (!kIsWeb && _selectedZipFile != null)
+                            Text(
+                              'Size: ${(FileUtils.lengthSync(_selectedZipFile!) / 1024 / 1024).toStringAsFixed(2)} MB',
+                              style: const TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isUploading ? null : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: (_isUploading || _selectedFileName == null) ? null : _uploadFolder,
+          child: _isUploading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Upload'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _selectZipFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['zip'],
+        withData: kIsWeb, // Get bytes for web
+      );
+
+      if (result != null) {
+        final pickedFile = result.files.single;
+        
+        if (kIsWeb) {
+          // For web platform
+          if (pickedFile.bytes == null) {
+            _showError('Could not read file data on web platform');
+            return;
+          }
+          
+          setState(() {
+            _selectedZipFile = null;
+            _selectedZipBytes = pickedFile.bytes;
+            _selectedFileName = pickedFile.name;
+          });
+        } else {
+          // For other platforms
+          if (pickedFile.path == null) {
+            _showError('Could not get file path');
+            return;
+          }
+          
+          setState(() {
+            if (!kIsWeb) {
+              io.File? newSelectedFile;
+              if (!kIsWeb) {
+                newSelectedFile = io.File(pickedFile.path!);
+              }
+              _selectedZipFile = newSelectedFile;
+            } else {
+              _selectedZipFile = null;
+            }
+            _selectedZipBytes = null;
+            _selectedFileName = pickedFile.name;
+          });
+        }
+      }
+    } catch (e) {
+      _showError('Error selecting file: $e');
+    }
+  }
+
+  Future<void> _uploadFolder() async {
+    setState(() {
+      _isUploading = true;
+    });
+
+    try {
+      Map<String, dynamic> data = {};
+      
+      if (widget.parentFolderId != null) {
+        data['parent_folder_id'] = widget.parentFolderId;
+      }
+
+      dynamic response;
+      
+      if (kIsWeb && _selectedZipBytes != null) {
+        // Web upload using bytes
+        response = await _apiService.uploadFileFromBytes(
+          '/manager/folder/upload/',
+          _selectedZipBytes!,
+          _selectedFileName!,
+          data.map((key, value) => MapEntry(key, value.toString())),
+        );
+      } else if (!kIsWeb && _selectedZipFile != null) {
+        // Native platform upload using file
+        response = await _apiService.uploadFile(
+          '/manager/folder/upload/',
+          _selectedZipFile!,
+          data.map((key, value) => MapEntry(key, value.toString())),
+        );
+      } else {
+        throw Exception('No file selected or platform mismatch');
+      }
+
+      // Success
+      Navigator.pop(context);
+      widget.onFolderUploaded();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Folder uploaded successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      _showError('Upload failed: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+        });
+      }
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
+
+class _ShareDialog extends StatefulWidget {
+  final String documentId;
+  final String documentName;
+
+  const _ShareDialog({
+    required this.documentId,
+    required this.documentName,
+  });
+
+  @override
+  State<_ShareDialog> createState() => _ShareDialogState();
+}
+
+class _ShareDialogState extends State<_ShareDialog> {
+  final ApiService _apiService = ApiService();
+  bool _isCreating = false;
+  String? _shareLink;
+  DateTime? _expiryDate;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Share Document'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Document: ${widget.documentName}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            
+            if (_shareLink != null) ...[
+              const Text('Share Link:'),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: SelectableText(
+                        _shareLink!,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.copy),
+                      onPressed: () {
+                        // Copy to clipboard functionality would go here
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Link copied to clipboard!')),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            
+            // Expiry date picker
+            Row(
+              children: [
+                const Text('Expires: '),
+                TextButton(
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _expiryDate ?? DateTime.now().add(const Duration(days: 7)),
+                      firstDate: DateTime.now(),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _expiryDate = picked;
+                      });
+                    }
+                  },
+                  child: Text(
+                    _expiryDate?.toString().split(' ')[0] ?? 'Select Date',
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+        if (_shareLink == null)
+          ElevatedButton(
+            onPressed: _isCreating ? null : _createShareLink,
+            child: _isCreating
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Create Link'),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _createShareLink() async {
+    setState(() {
+      _isCreating = true;
+    });
+
+    try {
+      final data = <String, dynamic>{
+        'document': widget.documentId,
+        'is_active': true,
+      };
+
+      if (_expiryDate != null) {
+        data['expires_at'] = _expiryDate!.toIso8601String();
+      }
+
+      final response = await _apiService.post('/manager/share/', data, {});
+      
+      final token = response['token'];
+      final baseUrl = 'http://172.22.253.81:8000'; // TODO: Make this configurable
+      
+      setState(() {
+        _shareLink = '$baseUrl/api/manager/share/$token/';
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to create share link: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isCreating = false;
+      });
+    }
   }
 } 

@@ -1,6 +1,7 @@
 import 'package:doc_manager/screens/documents_screen.dart';
 import 'package:doc_manager/screens/folders_screen.dart';
 import 'package:doc_manager/screens/login_screen.dart';
+import 'package:doc_manager/screens/shareable_links_screen.dart';
 import 'package:doc_manager/screens/settings_screen.dart';
 import 'package:doc_manager/shared/components/responsive_builder.dart';
 import 'package:doc_manager/shared/services/auth_service.dart';
@@ -170,12 +171,14 @@ class _MainScreenState extends State<MainScreen> {
   final List<Widget> _desktopScreens = [
     const FoldersScreen(),
     const DocumentsScreen(),
+    const ShareableLinksScreen(),
     const SettingsScreen(),
   ];
   
   final List<String> _screenTitles = [
     'Folders',
     'Documents',
+    'Shared Links',
     'Settings',
   ];
   
@@ -215,6 +218,10 @@ class _MainScreenState extends State<MainScreen> {
             label: 'Documents',
           ),
           BottomNavigationBarItem(
+            icon: Icon(Icons.share),
+            label: 'Shared Links',
+          ),
+          BottomNavigationBarItem(
             icon: Icon(Icons.settings),
             label: 'Settings',
           ),
@@ -239,6 +246,10 @@ class _MainScreenState extends State<MainScreen> {
               NavigationRailDestination(
                 icon: Icon(Icons.description),
                 label: Text('Documents'),
+              ),
+              NavigationRailDestination(
+                icon: Icon(Icons.share),
+                label: Text('Shared Links'),
               ),
               NavigationRailDestination(
                 icon: Icon(Icons.settings),

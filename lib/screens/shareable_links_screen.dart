@@ -7,9 +7,9 @@ import 'package:doc_manager/blocs/shareable_link/shareable_link_state.dart';
 import 'package:doc_manager/models/shareable_link.dart';
 
 class ShareableLinksScreen extends StatefulWidget {
-  final String documentId;
+  final String? documentId; // Optional - if null, shows all links
   
-  const ShareableLinksScreen({super.key, required this.documentId});
+  const ShareableLinksScreen({super.key, this.documentId});
 
   @override
   State<ShareableLinksScreen> createState() => _ShareableLinksScreenState();
@@ -22,7 +22,12 @@ class _ShareableLinksScreenState extends State<ShareableLinksScreen> {
   @override
   void initState() {
     super.initState();
-    context.read<ShareableLinkBloc>().add(GetShareableLinks(resourceId: widget.documentId));
+    if (widget.documentId != null) {
+      context.read<ShareableLinkBloc>().add(GetShareableLinks(resourceId: widget.documentId!));
+    } else {
+      // Load all shareable links
+      context.read<ShareableLinkBloc>().add(const LoadShareableLinks());
+    }
   }
   
   void _showCreateLinkDialog() {
@@ -93,15 +98,21 @@ class _ShareableLinksScreenState extends State<ShareableLinksScreen> {
             ),
             ElevatedButton(
               onPressed: () {
-                context.read<ShareableLinkBloc>().add(
-                  CreateShareableLink(
-                    resourceId: widget.documentId,
-                    permissionType: _selectedPermissionType!,
-                    expiresAt: _expiryDate!,
-                    documentId: widget.documentId,
-                  ),
-                );
-                Navigator.pop(context);
+                if (widget.documentId != null) {
+                  context.read<ShareableLinkBloc>().add(
+                    CreateShareableLink(
+                      resourceId: widget.documentId!,
+                      permissionType: _selectedPermissionType!,
+                      expiresAt: _expiryDate!,
+                      documentId: widget.documentId!,
+                    ),
+                  );
+                  Navigator.pop(context);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('No document selected')),
+                  );
+                }
               },
               child: const Text('Create'),
             ),
@@ -156,13 +167,17 @@ class _ShareableLinksScreenState extends State<ShareableLinksScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Error: ${state.error}')),
             );
-          } else if (state is ShareableLinkSuccess) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(state.message)),
-            );
-            // Refresh links after operation
-            context.read<ShareableLinkBloc>().add(GetShareableLinks(resourceId: widget.documentId));
-          }
+                      } else if (state is ShareableLinkSuccess) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(state.message)),
+              );
+              // Refresh links after operation
+              if (widget.documentId != null) {
+                context.read<ShareableLinkBloc>().add(GetShareableLinks(resourceId: widget.documentId!));
+              } else {
+                context.read<ShareableLinkBloc>().add(const LoadShareableLinks());
+              }
+            }
         },
         builder: (context, state) {
           if (state is ShareableLinkLoading) {
@@ -265,10 +280,10 @@ class _ShareableLinksScreenState extends State<ShareableLinksScreen> {
           return const Center(child: Text('Select a document to manage shareable links'));
         },
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: widget.documentId != null ? FloatingActionButton(
         onPressed: _showCreateLinkDialog,
         child: const Icon(Icons.add_link),
-      ),
+      ) : null,
     );
   }
   

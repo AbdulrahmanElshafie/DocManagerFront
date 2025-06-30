@@ -53,32 +53,28 @@ dependencies:
   # Utils
   intl: ^0.18.1
   logger: ^2.0.1
-  file_picker: ^5.5.0
+  file_picker: ^8.1.2
   path: ^1.8.3
   share_plus: ^7.1.0
   url_launcher: ^6.1.14
-  uuid: ^4.0.0  # Required by super_editor
-  
+
   # UI components
   flutter_markdown: ^0.6.17
   cached_network_image: ^3.3.0
   flutter_svg: ^2.0.7
+  flutter_html: ^3.0.0-beta.2
+  data_table_2: ^2.5.15
   
   # Document viewers and editors - Updated versions
-  syncfusion_flutter_pdfviewer: ^27.1.57
-  syncfusion_flutter_pdf: ^27.1.57
-  syncfusion_flutter_core: ^27.1.57
-  syncfusion_flutter_datagrid: ^27.1.57
-  syncfusion_flutter_xlsio: ^27.1.57
-  docx_template: ^0.3.4
-  excel: ^2.1.0
-  csv: ^5.0.2
-  super_editor: ^0.3.0-dev.23
+  universal_file_viewer: ^0.1.2
+  syncfusion_flutter_pdfviewer: ^28.1.37
+  syncfusion_flutter_pdf: ^28.1.37
+  syncfusion_flutter_core: ^28.1.37
+  open_file: ^3.3.2
   
   # Document conversion
   html: ^0.15.4
   markdown: ^7.1.1
-  web_socket_channel: ^2.4.0
   
   # Provider
   provider: ^6.0.5

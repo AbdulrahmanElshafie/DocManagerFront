@@ -26,11 +26,11 @@ class Comment extends Equatable {
   factory Comment.fromJson(Map<String, dynamic> json) {
     return Comment(
       id: json['id'],
-      documentId: json['document_id'],
+      documentId: json['document'],
       content: json['content'],
-      userId: json['user_id'],
-      userName: json['user_name'] ?? 'User', // Handle missing user name
-      userAvatar: json['user_avatar'],
+      userId: json['user']?.toString() ?? json['user_details']?['id']?.toString() ?? '',
+      userName: json['user_details']?['username'] ?? 'User',
+      userAvatar: json['user_details']?['avatar'],
       createdAt: DateTime.parse(json['created_at']),
       updatedAt: json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null,
       replies: json['replies'] != null
@@ -41,11 +41,9 @@ class Comment extends Equatable {
 
   Map<String, dynamic> toJson() => {
     'id': id,
-    'document_id': documentId,
+    'document': documentId,
     'content': content,
-    'user_id': userId,
-    'user_name': userName,
-    'user_avatar': userAvatar,
+    'user': userId,
     'created_at': createdAt.toIso8601String(),
     'updated_at': updatedAt?.toIso8601String(),
     'replies': replies.map((e) => e.toJson()).toList(),

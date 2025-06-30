@@ -1,21 +1,19 @@
-import 'dart:io' if (dart.library.html) 'dart:html' as html;
 import 'dart:io' as io show File;
 import 'dart:typed_data';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path/path.dart' as path;
-import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
+import 'package:open_file/open_file.dart';
 import '../shared/utils/file_utils.dart';
 import '../models/document.dart';
 import '../shared/utils/logger.dart';
-import '../shared/network/api_service.dart';
-import 'super_editor_widget.dart';
-import 'improved_pdf_viewer.dart';
-import 'improved_csv_editor.dart';
+import '../shared/network/api.dart';
+import 'improved_pdf_viewer.dart';  
 import 'version_management_widget.dart';
+// Conditional import for web-specific functionality
+import 'dart:html' if (dart.library.html) 'dart:html' as html;
 
 class FileEditor extends StatefulWidget {
   final Document? document;
@@ -38,21 +36,14 @@ class FileEditor extends StatefulWidget {
 class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
   DocumentType? _fileType;
   String? _fileName;
-  io.File? _currentFile;
   String? _fileUrl; // For remote files
+  String? _filePath; // For local files or downloaded files
   bool _isRemoteFile = false;
   bool _isLoading = true;
   String? _errorMessage;
   Uint8List? _fileBytes; // For web or downloaded remote files
   
   late TabController _tabController;
-
-  // Content data
-  String? _documentContent;
-  String? _csvContent;
-  List<List<String>>? _csvData;
-
-  final ApiService _apiService = ApiService();
 
   @override
   void initState() {
@@ -79,7 +70,8 @@ class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
 
   String _makeFullUrl(String relativePath) {
     // Convert relative API path to full URL
-    final baseUrl = 'http://localhost:8000';
+    // Use the base URL from API configuration, removing the '/api' suffix
+    final baseUrl = API.baseUrl.replaceAll('/api', '');
     if (relativePath.startsWith('/')) {
       return '$baseUrl$relativePath';
     } else {
@@ -111,16 +103,16 @@ class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
           LoggerUtil.info('Relative API path converted to URL: $_fileUrl');
         } else {
           _isRemoteFile = false;
-          _currentFile = widget.document!.file;
+          _filePath = filePath;
         }
       } else if (widget.file != null) {
         _isRemoteFile = false;
-        _currentFile = widget.file;
         try {
           if (kIsWeb) {
             _fileName = 'web_file';
           } else {
             _fileName = FileUtils.getFileName(widget.file!);
+            _filePath = FileUtils.getFilePath(widget.file!);
           }
         } catch (e) {
           _fileName = 'unknown_file';
@@ -174,23 +166,30 @@ class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
 
   Future<void> _loadFileContent() async {
     try {
-      // For remote files, download them first
+      // For remote files, download them first 
       if (_isRemoteFile && _fileUrl != null) {
         _fileBytes = await _downloadRemoteFile(_fileUrl!);
-      }
-
-      switch (_fileType!) {
-        case DocumentType.csv:
-          await _loadCSVContent();
-          break;
-        case DocumentType.pdf:
-          await _loadPDFContent();
-          break;
-        case DocumentType.docx:
-          await _loadDOCXContent();
-          break;
-        case DocumentType.unsupported:
-          throw Exception('Unsupported file type');
+        
+        // For DOCX and CSV files, handle platform-specific file access
+        if (_fileType == DocumentType.docx || _fileType == DocumentType.csv) {
+          if (kIsWeb) {
+            // On web, we can't save to file system, so we'll just keep the bytes in memory
+            // and show a simple preview with download option
+            LoggerUtil.info('Web platform: keeping file in memory');
+          } else {
+            // On mobile/desktop, save to temp directory for external app opening
+            try {
+              final tempDir = await getTemporaryDirectory();
+              final tempFile = io.File('${tempDir.path}/$_fileName');
+              await tempFile.writeAsBytes(_fileBytes!);
+              _filePath = tempFile.path;
+              LoggerUtil.info('Saved remote file to temp path: $_filePath');
+            } catch (e) {
+              LoggerUtil.error('Error saving to temp directory: $e');
+              // Fall back to in-memory handling
+            }
+          }
+        }
       }
 
       setState(() {
@@ -205,205 +204,98 @@ class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _loadCSVContent() async {
-    try {
-      String csvText;
-      
-      if (widget.document != null) {
-        // Get CSV content from API
-        try {
-          final response = await _apiService.get(
-            '/manager/document/${widget.document!.id}/content/',
-            {},
-          );
-          
-          csvText = response['content'] ?? '';
-          if (csvText.isEmpty) {
-            // Create empty CSV content if none exists
-            csvText = 'Column A,Column B,Column C\nValue 1,Value 2,Value 3\n';
-          }
-        } catch (e) {
-          LoggerUtil.warning('Could not load CSV from API, creating empty CSV: $e');
-          csvText = 'Column A,Column B,Column C\nValue 1,Value 2,Value 3\n';
-        }
-      } else if (_isRemoteFile && _fileBytes != null) {
-        csvText = utf8.decode(_fileBytes!);
-      } else if (_currentFile != null) {
-        if (kIsWeb) {
-          throw UnsupportedError('Local file reading not supported on web. Use remote files instead.');
-        } else {
-          csvText = await FileUtils.readAsString(_currentFile!);
-        }
-      } else {
-        throw Exception('No file data available');
-      }
-
-      setState(() {
-        _csvContent = csvText;
-      });
-
-      LoggerUtil.info('CSV content loaded successfully');
-    } catch (e) {
-      LoggerUtil.error('Error loading CSV content: $e');
-      rethrow;
-    }
-  }
-
-  Future<void> _loadPDFContent() async {
-    try {
-      if (_isRemoteFile) {
-        // For remote files, download the bytes if not already downloaded
-        if (_fileBytes == null && _fileUrl != null) {
-          _fileBytes = await _downloadRemoteFile(_fileUrl!);
-        }
-        LoggerUtil.info('PDF loaded from remote URL, size: ${_fileBytes?.length ?? 0} bytes');
-      } else if (_currentFile != null) {
-        // For local files, read as bytes (only on non-web platforms)
-        if (kIsWeb) {
-          throw UnsupportedError('Local file reading not supported on web. Use remote files instead.');
-        } else {
-          _fileBytes = await FileUtils.readAsBytes(_currentFile!);
-          LoggerUtil.info('PDF loaded from local file, size: ${_fileBytes!.length} bytes');
-        }
-      } else {
-        throw Exception('No PDF data available');
-      }
-      
-      if (_fileBytes == null || _fileBytes!.isEmpty) {
-        throw Exception('PDF file is empty or could not be loaded');
-      }
-    } catch (e) {
-      LoggerUtil.error('Error loading PDF content: $e');
-      rethrow;
-    }
-  }
-
-  Future<void> _loadDOCXContent() async {
-    try {
-      if (widget.document != null) {
-        // Get document content from API as HTML for Super Editor
-        try {
-          final response = await _apiService.get(
-            '/manager/document/${widget.document!.id}/content/',
-            {'format': 'html'},
-          );
-          
-          setState(() {
-            _documentContent = response['content'] ?? '<p>Start typing your document...</p>';
-          });
-          
-          LoggerUtil.info('DOCX content loaded as HTML from API');
-        } catch (e) {
-          LoggerUtil.warning('Could not load DOCX from API, creating empty content: $e');
-          setState(() {
-            _documentContent = '<p>Start typing your document...</p>';
-          });
-        }
-      } else {
-        throw Exception('Document API access not available for local files');
-      }
-    } catch (e) {
-      LoggerUtil.error('Error loading DOCX content: $e');
-      setState(() {
-        _documentContent = '<p>Error loading document. Start typing your document...</p>';
-      });
-    }
-  }
-
-  Future<void> _saveDocumentContent(String content, String contentType) async {
-    if (widget.document == null) {
-      LoggerUtil.error('Cannot save without document reference');
-      return;
-    }
-
-    try {
-      await _apiService.updateDocumentContent(
-        widget.document!.id,
-        content,
-        contentType,
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Document saved successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      LoggerUtil.error('Error saving document: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving document: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _saveCsvData(List<List<String>> data) async {
-    try {
-      const converter = ListToCsvConverter();
-      final csvContent = converter.convert(data);
-
-      if (widget.document != null) {
-        // Save via API
-        await _apiService.updateDocumentContent(
-          widget.document!.id,
-          csvContent,
-          'csv',
-        );
-      } else if (_currentFile != null) {
-        // Save to local file
-        await FileUtils.writeAsString(_currentFile!, csvContent);
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('CSV data saved successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      LoggerUtil.error('Error saving CSV data: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving CSV: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
   Widget _buildEditor() {
     switch (_fileType!) {
       case DocumentType.csv:
-        return ImprovedCsvEditor(
-          document: widget.document!,
-          csvContent: _csvContent,
-          onSave: _saveCsvData,
-        );
+      case DocumentType.docx:
+        // Use universal_file_viewer for DOCX and CSV files
+        // Check if we have either a local file path or downloaded file bytes
+        if (_filePath != null || _fileBytes != null) {
+          return Column(
+            children: [
+              // View-only notice
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.blue.shade700),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Document viewer for ${_fileType == DocumentType.docx ? 'DOCX' : 'CSV'} files.',
+                        style: TextStyle(color: Colors.blue.shade700),
+                      ),
+                    ),
+                    // Only show "Open External" button if we have a local file path
+                    if (_filePath != null)
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          try {
+                            final result = await OpenFile.open(_filePath!);
+                            if (result.type != ResultType.done) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Could not open file: ${result.message}'),
+                                    backgroundColor: Colors.orange,
+                                  ),
+                                );
+                              }
+                            }
+                          } catch (e) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Error opening file: $e'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          }
+                        },
+                        icon: const Icon(Icons.open_in_new, size: 16),
+                        label: const Text('Open External'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          minimumSize: const Size(0, 28),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              // Universal file viewer
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  child: _buildFileViewerWithFallback(),
+                ),
+              ),
+            ],
+          );
+        } else {
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error_outline, size: 64, color: Colors.red),
+                SizedBox(height: 16),
+                Text('File not available for viewing'),
+              ],
+            ),
+          );
+        }
       
       case DocumentType.pdf:
+        // Keep existing PDF editor functionality
         return ImprovedPdfViewer(
           document: widget.document!,
           pdfBytes: _fileBytes,
           pdfUrl: _isRemoteFile ? _fileUrl : null,
-        );
-      
-      case DocumentType.docx:
-        return SuperEditorWidget(
-          document: widget.document!,
-          initialContent: _documentContent,
-          contentFormat: 'html',
-          onSave: _saveDocumentContent,
         );
       
       case DocumentType.unsupported:
@@ -420,11 +312,132 @@ class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
     }
   }
 
+  Widget _buildFileViewerWithFallback() {
+    // Simple preview for DOCX and CSV files with external open option
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            _fileType == DocumentType.docx ? Icons.description : Icons.table_chart,
+            size: 64,
+            color: _fileType == DocumentType.docx ? Colors.blue : Colors.green,
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Document Preview',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'File: ${widget.document?.name ?? _fileName}',
+            style: TextStyle(color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Type: ${_fileType == DocumentType.docx ? 'Word Document' : 'CSV Spreadsheet'}',
+            style: TextStyle(color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 24),
+          
+          // Show appropriate action button based on platform and file availability
+          if (kIsWeb && _fileBytes != null)
+            // Web platform: provide download option
+            ElevatedButton.icon(
+              onPressed: () async {
+                try {
+                  if (kIsWeb) {
+                    // Web download using blob and anchor element
+                    final html.Blob blob = html.Blob([_fileBytes!]);
+                    final url = html.Url.createObjectUrlFromBlob(blob);
+                    final anchor = html.AnchorElement(href: url)
+                      ..setAttribute('download', _fileName ?? 'document')
+                      ..click();
+                    html.Url.revokeObjectUrl(url);
+                    
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Download started'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    }
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Error downloading file: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              },
+              icon: const Icon(Icons.download),
+              label: const Text('Download File'),
+            )
+          else if (!kIsWeb && _filePath != null)
+            // Mobile/Desktop: open in external app
+            ElevatedButton.icon(
+              onPressed: () async {
+                try {
+                  final result = await OpenFile.open(_filePath!);
+                  if (result.type != ResultType.done) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Could not open file: ${result.message}'),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                    }
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Error opening file: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              },
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Open in External App'),
+            )
+          else
+            // Fallback: show unavailable message
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.shade200),
+              ),
+              child: Column(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.orange.shade700),
+                  const SizedBox(height: 8),
+                  Text(
+                    'File not available for preview',
+                    style: TextStyle(color: Colors.orange.shade700),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTabContent() {
     return TabBarView(
       controller: _tabController,
       children: [
-        // Editor Tab
+        // Viewer Tab (changed from Editor)
         _buildEditor(),
         
         // Version Management Tab
@@ -433,6 +446,18 @@ class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
           : const Center(child: Text('Version management not available for local files')),
       ],
     );
+  }
+
+  String _getTabTitle() {
+    switch (_fileType!) {
+      case DocumentType.csv:
+      case DocumentType.docx:
+        return 'Viewer'; // View-only for DOCX and CSV
+      case DocumentType.pdf:
+        return 'Editor'; // Still editable for PDF
+      default:
+        return 'Viewer';
+    }
   }
 
   @override
@@ -477,39 +502,41 @@ class _FileEditorState extends State<FileEditor> with TickerProviderStateMixin {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_fileName ?? 'File Editor'),
+        title: Text(_fileName ?? 'File Viewer'),
         bottom: widget.document != null 
           ? TabBar(
               controller: _tabController,
-              tabs: const [
-                Tab(icon: Icon(Icons.edit), text: 'Editor'),
-                Tab(icon: Icon(Icons.history), text: 'Versions'),
+              tabs: [
+                Tab(
+                  icon: Icon(_fileType == DocumentType.pdf ? Icons.edit : Icons.visibility),
+                  text: _getTabTitle(),
+                ),
+                const Tab(icon: Icon(Icons.history), text: 'Versions'),
               ],
             )
           : null,
         actions: [
-          if (_fileType == DocumentType.pdf || _fileType == DocumentType.csv)
-            PopupMenuButton<String>(
-              onSelected: (value) {
-                switch (value) {
-                  case 'refresh':
-                    _initializeEditor();
-                    break;
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: 'refresh',
-                  child: Row(
-                    children: [
-                      Icon(Icons.refresh),
-                      SizedBox(width: 8),
-                      Text('Refresh'),
-                    ],
-                  ),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              switch (value) {
+                case 'refresh':
+                  _initializeEditor();
+                  break;
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'refresh',
+                child: Row(
+                  children: [
+                    Icon(Icons.refresh),
+                    SizedBox(width: 8),
+                    Text('Refresh'),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
+          ),
         ],
       ),
       body: widget.document != null ? _buildTabContent() : _buildEditor(),

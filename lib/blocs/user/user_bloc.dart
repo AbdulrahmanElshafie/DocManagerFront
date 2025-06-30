@@ -4,7 +4,6 @@ import 'package:doc_manager/blocs/user/user_state.dart';
 import 'package:doc_manager/models/user.dart';
 import 'package:doc_manager/repository/user_repository.dart';
 import 'package:doc_manager/shared/utils/logger.dart';
-import 'dart:developer' as developer;
 
 class UserBloc extends Bloc<UserEvent, UserState> {
   final UserRepository _userRepository;

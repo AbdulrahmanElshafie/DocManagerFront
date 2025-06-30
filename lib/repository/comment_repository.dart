@@ -1,11 +1,10 @@
 import 'package:doc_manager/shared/network/api_service.dart';
-import 'package:doc_manager/shared/network/api.dart';
 import 'package:doc_manager/models/comment.dart';
 import 'dart:developer' as developer;
 
 class CommentRepository {
   final ApiService _apiService = ApiService();
-  final bool _useMockData = true; // Temporary flag to use mock data
+  final bool _useMockData = false; // Use real backend now
 
   // Mock data for comments
   final Map<String, List<Comment>> _mockComments = {};
@@ -34,10 +33,9 @@ class CommentRepository {
     }
     
     try {
-      final response = await _apiService.post(API.comments, {
-        'document_id': documentId,
-        'content': content,
-        'user_id': userId
+      final response = await _apiService.post('/manager/comment/', {
+        'document': documentId,
+        'content': content
       }, {});
       return Comment.fromJson(response);
     } catch (e) {
@@ -52,8 +50,8 @@ class CommentRepository {
     }
     
     try {
-      // Try using the getList method first with document_id as query param
-      final response = await _apiService.getList(API.comments, {'document_id': documentId});
+      // Use the document_comments endpoint
+      final response = await _apiService.getList('/manager/comment/document/', {'document_id': documentId});
       return response.map((e) => Comment.fromJson(e)).toList();
     } catch (e) {
       developer.log('Error getting comments: $e', name: 'CommentRepository');
@@ -72,7 +70,7 @@ class CommentRepository {
     }
     
     try {
-      final response = await _apiService.delete(API.comments, id);
+      final response = await _apiService.delete('/manager/comment/', id);
       return response;
     } catch (e) {
       developer.log('Error deleting comment: $e', name: 'CommentRepository');
@@ -102,7 +100,7 @@ class CommentRepository {
     }
     
     try {
-      final response = await _apiService.put(API.comments, {
+      final response = await _apiService.put('/manager/comment/', {
         'content': content
       }, id);
       return response;
@@ -127,7 +125,7 @@ class CommentRepository {
     }
     
     try {
-      final response = await _apiService.get(API.comments, {'id': id});
+      final response = await _apiService.get('/manager/comment/$id/', {});
       return Comment.fromJson(response);
     } catch (e) {
       developer.log('Error getting comment: $e', name: 'CommentRepository');

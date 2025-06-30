@@ -3,6 +3,8 @@ import 'dart:io' as io show File;
 import 'package:doc_manager/models/document.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../shared/utils/file_utils.dart';
+import 'package:intl/intl.dart';
+import 'document.dart';
 
 class Version extends Document {
   final String versionId;
@@ -21,6 +23,7 @@ class Version extends Document {
     required super.name,
     super.file,
     super.filePath,
+    super.fileUrl,
     required super.type,
     required super.folderId,
     required super.ownerId,
@@ -67,6 +70,7 @@ class Version extends Document {
       name: json['name'],
       file: fileObj,
       filePath: filePathStr,
+      fileUrl: json['file_url'],
       type: _parseDocumentType(json['type']),
       folderId: json['folderId'] ?? json['folder'],
       ownerId: json['ownerId'] ?? json['owner'] ?? '',
@@ -117,6 +121,7 @@ class Version extends Document {
     String? name,
     io.File? file,
     String? filePath,
+    String? fileUrl,
     DocumentType? type,
     String? folderId,
     String? ownerId,
@@ -134,6 +139,7 @@ class Version extends Document {
       name: name ?? this.name,
       file: file ?? this.file,
       filePath: filePath ?? this.filePath,
+      fileUrl: fileUrl ?? this.fileUrl,
       type: type ?? this.type,
       folderId: folderId ?? this.folderId,
       ownerId: ownerId ?? this.ownerId,

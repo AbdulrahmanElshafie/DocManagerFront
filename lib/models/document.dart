@@ -1,4 +1,3 @@
-import 'dart:io' if (dart.library.html) 'dart:html' as html;
 import 'dart:io' as io show File;
 import 'package:equatable/equatable.dart';
 import 'dart:developer' as developer;
@@ -16,8 +15,9 @@ enum DocumentType {
 class Document extends Equatable {
   final String id;
   final String name;
-  late io.File? file;
+  final io.File? file;
   final String? filePath;
+  final String? fileUrl;
   final DocumentType type;
   final String folderId;
   final String ownerId;
@@ -30,6 +30,7 @@ class Document extends Equatable {
     required this.name,
     this.file,
     this.filePath,
+    this.fileUrl,
     required this.type,
     required this.folderId,
     required this.ownerId,
@@ -103,12 +104,12 @@ class Document extends Equatable {
     DocumentType docType = _parseDocumentType(json['type']);
     
     // Then try to infer from the file path if available
-    if ((docType == DocumentType.unsupported || docType == null) && filePathStr != null) {
+    if (docType == DocumentType.unsupported && filePathStr != null) {
       docType = _inferTypeFromPath(filePathStr);
     }
     
     // Finally, try to infer from the name as a last resort
-    if ((docType == DocumentType.unsupported || docType == null) && json['name'] != null) {
+    if (docType == DocumentType.unsupported && json['name'] != null) {
       docType = _inferTypeFromPath(json['name']);
     }
     
@@ -117,6 +118,7 @@ class Document extends Equatable {
       name: json['name'] ?? '',
       file: fileObj,
       filePath: filePathStr,
+      fileUrl: json['file_url'],
       ownerId: json['owner']?.toString() ?? '',
       createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
       updatedAt: json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null,
@@ -180,6 +182,7 @@ class Document extends Equatable {
     String? name,
     io.File? file,
     String? filePath,
+    String? fileUrl,
     DocumentType? type,
     String? folderId,
     String? ownerId,
@@ -193,6 +196,7 @@ class Document extends Equatable {
       name: name ?? this.name,
       file: file ?? this.file,
       filePath: filePath ?? this.filePath,
+      fileUrl: fileUrl ?? this.fileUrl,
       type: type ?? this.type,
       folderId: folderId ?? this.folderId,
       ownerId: ownerId ?? this.ownerId,
@@ -229,12 +233,35 @@ class Document extends Equatable {
     );
   }
 
+  /// Get the absolute URL for the document file
+  String? getAbsoluteFileUrl() {
+    if (fileUrl != null) {
+      if (fileUrl!.startsWith('http')) {
+        return fileUrl;
+      } else {
+        // Prepend base API URL if it's a relative path
+        return 'http://localhost:8000$fileUrl';
+      }
+    }
+    
+    // Fallback to constructing URL from file path if fileUrl is not available
+    if (filePath != null) {
+      final url = filePath!.startsWith('http') 
+          ? filePath! 
+          : 'http://localhost:8000$filePath';
+      return url;
+    }
+    
+    return null;
+  }
+
   @override
   List<Object?> get props => [
         id,
         name,
         file,
         filePath,
+        fileUrl,
         type,
         folderId,
         ownerId,

@@ -25,13 +25,13 @@ class ShareableLink extends Equatable {
   DateTime get expiryDate => expiresAt;
 
   factory ShareableLink.fromJson(Map<String, dynamic> json) => ShareableLink(
-    id: json['id'],
-    documentId: json['documentId'],
-    token: json['token'],
-    createdAt: DateTime.parse(json['createdAt']),
-    expiresAt: DateTime.parse(json['expiresAt']),
-    isActive: json['isActive'],
-    createdBy: json['createdBy'],
+    id: json['id'] ?? '',
+    documentId: json['document'] ?? json['documentId'] ?? '',
+    token: json['token'] ?? '',
+    createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
+    expiresAt: json['expires_at'] != null ? DateTime.parse(json['expires_at']) : DateTime.now().add(Duration(days: 7)),
+    isActive: json['is_active'] ?? json['isActive'] ?? true,
+    createdBy: json['created_by']?.toString() ?? json['createdBy']?.toString() ?? '',
     permissionType: json['permissionType'] ?? 'read',
   );
 

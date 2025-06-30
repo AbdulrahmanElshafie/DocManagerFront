@@ -18,6 +18,13 @@ class _CommentsSectionState extends State<CommentsSection> {
   final TextEditingController _commentController = TextEditingController();
   
   @override
+  void initState() {
+    super.initState();
+    // Load comments when the widget is initialized
+    context.read<CommentBloc>().add(LoadComments(widget.documentId));
+  }
+  
+  @override
   void dispose() {
     _commentController.dispose();
     super.dispose();
@@ -25,18 +32,50 @@ class _CommentsSectionState extends State<CommentsSection> {
   
   @override
   Widget build(BuildContext context) {
-    return BlocBuilder<CommentBloc, CommentState>(
-      builder: (context, state) {
-        if (state is CommentLoading) {
-          return const Center(child: CircularProgressIndicator());
+    return BlocListener<CommentBloc, CommentState>(
+      listener: (context, state) {
+        if (state is CommentOperationSuccess) {
+          // Reload comments after successful operation
+          context.read<CommentBloc>().add(LoadComments(widget.documentId));
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(state.message),
+              backgroundColor: Colors.green,
+            ),
+          );
         } else if (state is CommentError) {
-          return Center(child: Text('Error: ${state.error}'));
-        } else if (state is CommentsLoaded) {
-          return _buildCommentsList(state.comments);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(state.error),
+              backgroundColor: Colors.red,
+            ),
+          );
         }
-        
-        return _buildCommentsList([]);
       },
+      child: BlocBuilder<CommentBloc, CommentState>(
+        builder: (context, state) {
+          if (state is CommentsLoading) {
+            return const Center(child: CircularProgressIndicator());
+          } else if (state is CommentError) {
+            return Center(
+              child: Column(
+                children: [
+                  Text('Error: ${state.error}'),
+                  ElevatedButton(
+                    onPressed: () => context.read<CommentBloc>().add(LoadComments(widget.documentId)),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            );
+          } else if (state is CommentsLoaded) {
+            return _buildCommentsList(state.comments);
+          }
+          
+          return _buildCommentsList([]);
+        },
+      ),
     );
   }
   
