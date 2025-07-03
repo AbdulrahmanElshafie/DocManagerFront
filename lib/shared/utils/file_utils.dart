@@ -8,7 +8,12 @@ class FileUtils {
   // Create a file path string for cross-platform compatibility
   static String getFileName(dynamic file) {
     if (kIsWeb) {
-      return 'web_file';
+      // For web, try to extract filename from File object properties
+      try {
+        return file.name ?? 'web_file';
+      } catch (e) {
+        return 'web_file';
+      }
     } else {
       try {
         return path.basename(file.path);
@@ -21,7 +26,12 @@ class FileUtils {
   // Check if file exists (cross-platform)
   static Future<bool> fileExists(dynamic file) async {
     if (kIsWeb) {
-      return true; // Assume file exists on web
+      // For web, check if file object is valid
+      try {
+        return file != null && file.size != null;
+      } catch (e) {
+        return false;
+      }
     } else {
       try {
         return await file.exists();
@@ -74,7 +84,11 @@ class FileUtils {
   // Get file size (cross-platform)
   static Future<int> getFileSize(dynamic file) async {
     if (kIsWeb) {
-      return 0; // Cannot get size on web
+      try {
+        return file.size ?? 0;
+      } catch (e) {
+        return 0;
+      }
     } else {
       try {
         return await file.length();
@@ -87,7 +101,11 @@ class FileUtils {
   // Check if file exists synchronously (cross-platform)
   static bool existsSync(dynamic file) {
     if (kIsWeb) {
-      return true; // Assume exists on web
+      try {
+        return file != null && file.size != null;
+      } catch (e) {
+        return false;
+      }
     } else {
       try {
         return file.existsSync();
@@ -100,7 +118,11 @@ class FileUtils {
   // Get file size synchronously (cross-platform)
   static int lengthSync(dynamic file) {
     if (kIsWeb) {
-      return 0; // Cannot get size on web
+      try {
+        return file.size ?? 0;
+      } catch (e) {
+        return 0;
+      }
     } else {
       try {
         return file.lengthSync();

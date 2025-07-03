@@ -1,7 +1,8 @@
+import '../config/app_config.dart';
+
 class API {
   // Base URL for the API
-  // static const String baseUrl = 'http://172.22.253.81:8000/api'; // TODO: Replace with actual base URL
-  static const String baseUrl = 'http://localhost:8000/api'; // TODO: Replace with actual base URL
+  static String get baseUrl => AppConfig.baseUrl;
   
 // Auth Endpoints
   static const String login = '/auth/login/';

@@ -22,11 +22,12 @@ class DocumentLoading extends DocumentState {
 
 class DocumentsLoaded extends DocumentState {
   final List<Document> documents;
+  final String? successMessage;
   
-  const DocumentsLoaded(this.documents);
+  const DocumentsLoaded(this.documents, {this.successMessage});
   
   @override
-  List<Object?> get props => [documents];
+  List<Object?> get props => [documents, successMessage];
 }
 
 class DocumentLoaded extends DocumentState {
@@ -90,4 +91,46 @@ class DocumentError extends DocumentState {
   
   @override
   List<Object?> get props => [error];
+}
+
+// Combined state classes to prevent multiple emissions
+class DocumentCreatedWithList extends DocumentState {
+  final Document document;
+  final List<Document> documents;
+  
+  const DocumentCreatedWithList({
+    required this.document,
+    required this.documents,
+  });
+  
+  @override
+  List<Object> get props => [document, documents];
+}
+
+class DocumentUpdatedWithList extends DocumentState {
+  final Map<String, dynamic> updateResult;
+  final Document document;
+  final List<Document>? documents;
+  
+  const DocumentUpdatedWithList({
+    required this.updateResult,
+    required this.document,
+    this.documents,
+  });
+  
+  @override
+  List<Object?> get props => [updateResult, document, documents];
+}
+
+class DocumentDeletedWithList extends DocumentState {
+  final Map<String, dynamic> deleteResult;
+  final List<Document>? documents;
+  
+  const DocumentDeletedWithList({
+    required this.deleteResult,
+    this.documents,
+  });
+  
+  @override
+  List<Object?> get props => [deleteResult, documents];
 } 
