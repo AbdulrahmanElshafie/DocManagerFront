@@ -221,7 +221,7 @@ class ApiService {
           contentType: mimeType,
         );
         
-        developer.log('CREATED MULTIPART FILE: ${multipartFile.filename} (${multipartFile.length} bytes)', 
+        developer.log('CREATED MULTIPART FILE: ${multipartFile.filename} (${multipartFile.length} bytes), MIME: ${mimeType.toString()}', 
                       name: 'ApiService');
                       
         // Add to request
@@ -329,7 +329,7 @@ class ApiService {
     
     request.files.add(multipartFile);
     
-    developer.log('CREATED MULTIPART FILE FROM BYTES: ${multipartFile.filename} (${multipartFile.length} bytes)', 
+    developer.log('CREATED MULTIPART FILE FROM BYTES: ${multipartFile.filename} (${multipartFile.length} bytes), MIME: ${mimeType.toString()}', 
                   name: 'ApiService');
     
     // Send request with timeout
@@ -464,6 +464,8 @@ class ApiService {
         return MediaType('text', 'csv');
       case '.txt':
         return MediaType('text', 'plain');
+      case '.zip':
+        return MediaType('application', 'zip');
       default:
         return MediaType('application', 'octet-stream');
     }

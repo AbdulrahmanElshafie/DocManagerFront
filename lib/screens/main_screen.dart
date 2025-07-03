@@ -327,10 +327,16 @@ class _MainScreenState extends State<MainScreen> {
                         onTap: () => _onItemTapped(1),
                       ),
                       ListTile(
-                        leading: const Icon(Icons.settings),
-                        title: const Text('Settings'),
+                        leading: const Icon(Icons.share),
+                        title: const Text('Shared Links'),
                         selected: _selectedIndex == 2,
                         onTap: () => _onItemTapped(2),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.settings),
+                        title: const Text('Settings'),
+                        selected: _selectedIndex == 3,
+                        onTap: () => _onItemTapped(3),
                       ),
                     ],
                   ),

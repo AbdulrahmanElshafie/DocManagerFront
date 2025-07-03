@@ -10,8 +10,10 @@ import 'package:doc_manager/shared/components/responsive_builder.dart';
 import 'package:doc_manager/repository/folder_repository.dart';
 import 'package:doc_manager/widgets/unified_document_viewer.dart';
 import 'package:doc_manager/shared/network/api_service.dart';
+import 'package:doc_manager/shared/network/api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io' if (dart.library.html) 'dart:html' as html;
@@ -1058,9 +1060,9 @@ class _FoldersScreenState extends State<FoldersScreen> {
             SliverGrid(
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: 1.2,
+                crossAxisSpacing: 6, // Further reduced from 8
+                mainAxisSpacing: 6,  // Further reduced from 8
+                childAspectRatio: 1.1, // Reduced from 1.4 (taller cards)
               ),
               delegate: SliverChildBuilderDelegate(
                 (context, index) => _buildDocumentCard(_filteredDocuments[index]),
@@ -1133,9 +1135,9 @@ class _FoldersScreenState extends State<FoldersScreen> {
             SliverGrid(
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 3,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: 1.5,
+                crossAxisSpacing: 8, // Further reduced from 10
+                mainAxisSpacing: 8,  // Further reduced from 10
+                childAspectRatio: 1.3, // Reduced from 1.6 (taller cards)
               ),
               delegate: SliverChildBuilderDelegate(
                 (context, index) => _buildDocumentCard(_filteredDocuments[index]),
@@ -1208,9 +1210,9 @@ class _FoldersScreenState extends State<FoldersScreen> {
             SliverGrid(
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 5,
-                crossAxisSpacing: 24,
-                mainAxisSpacing: 24,
-                childAspectRatio: 1.5,
+                crossAxisSpacing: 12, // Further reduced from 16
+                mainAxisSpacing: 12,  // Further reduced from 16
+                childAspectRatio: 1.4, // Reduced from 1.7 (taller cards)
               ),
               delegate: SliverChildBuilderDelegate(
                 (context, index) => _buildDocumentCard(_filteredDocuments[index]),
@@ -1350,87 +1352,136 @@ class _FoldersScreenState extends State<FoldersScreen> {
             ),
           ).then((_) => _loadContent()); // Reload on navigation back
         },
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              color: Colors.blue.shade100,
-              height: 70,
-              width: double.infinity,
-              child: Center(
-                child: _buildDocumentIcon(document),
-              ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      document.name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // Calculate responsive sizes based on available space
+            final cardHeight = constraints.maxHeight;
+            final cardWidth = constraints.maxWidth;
+            final isSmallCard = cardHeight < 150 || cardWidth < 120;
+            
+            // Dynamic sizes based on card dimensions
+            final iconSize = isSmallCard ? cardWidth * 0.2 : cardWidth * 0.25;
+            final titleFontSize = isSmallCard ? 10.0 : 12.0;
+            final subtitleFontSize = isSmallCard ? 8.0 : 10.0;
+            final buttonSize = isSmallCard ? 18.0 : 22.0;
+            final iconButtonSize = isSmallCard ? 16.0 : 20.0;
+            final padding = isSmallCard ? 4.0 : 6.0;
+            
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Flexible icon container - reduced space
+                Flexible(
+                  flex: 2, // Reduced from 3 to give more space to content
+                  child: Container(
+                    color: Colors.blue.shade100,
+                    width: double.infinity,
+                    child: Center(
+                      child: Icon(
+                        _getDocumentIconData(document),
+                        size: iconSize.clamp(20.0, 50.0), // Responsive but within limits
+                        color: _getDocumentIconColor(document),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Modified: ${document.updatedAt?.toString().split(' ')[0] ?? 'N/A'}',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey.shade700,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const Spacer(),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
+                  ),
+                ),
+                // Flexible content area with much more space
+                Flexible(
+                  flex: 2, // Increased from 2 to 3 (60% of card space)
+                  child: Padding(
+                    padding: EdgeInsets.all(padding),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit, size: 18),
-                          constraints: const BoxConstraints(maxHeight: 32),
-                          padding: EdgeInsets.zero,
-                          onPressed: () {
-                            Navigator.push(
-                              context, 
-                              MaterialPageRoute(
-                                builder: (context) => UnifiedDocumentViewer(
-                                  document: document,
-                                  onDocumentUpdated: () {
-                                    _loadContent();
-                                  },
+                        // Title with much more space allocated
+                        Expanded(
+                          flex: 2, // Increased from 2 to 3 for more title space
+                          child: Text(
+                            document.name,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: titleFontSize,
+                            ),
+                            maxLines: isSmallCard ? 1 : 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        SizedBox(height: padding / 4),
+                        // Subtitle with more space
+                        Expanded(
+                          flex: 1, // Increased from 1 to 2 for more date space
+                          child: Text(
+                            'Modified: ${document.updatedAt?.toString().split(' ')[0] ?? 'N/A'}',
+                            style: TextStyle(
+                              fontSize: subtitleFontSize,
+                              color: Colors.grey.shade700,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        SizedBox(height: padding / 4),
+                        // Action buttons with minimal space
+                        Expanded(
+                          flex: 1, // Keep buttons minimal
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: Icon(Icons.edit, size: iconButtonSize),
+                                constraints: BoxConstraints(
+                                  maxHeight: buttonSize,
+                                  maxWidth: buttonSize,
                                 ),
+                                padding: EdgeInsets.zero,
+                                onPressed: () {
+                                  Navigator.push(
+                                    context, 
+                                    MaterialPageRoute(
+                                      builder: (context) => UnifiedDocumentViewer(
+                                        document: document,
+                                        onDocumentUpdated: () {
+                                          _loadContent();
+                                        },
+                                      ),
+                                    ),
+                                  ).then((_) => _loadContent());
+                                },
                               ),
-                            ).then((_) => _loadContent()); // Reload on navigation back
-                          },
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.share, size: 18),
-                          constraints: const BoxConstraints(maxHeight: 32),
-                          padding: EdgeInsets.zero,
-                          onPressed: () {
-                            _shareDocument(document);
-                          },
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete, size: 18),
-                          constraints: const BoxConstraints(maxHeight: 32),
-                          padding: EdgeInsets.zero,
-                          onPressed: () {
-                            _deleteDocument(document);
-                          },
+                              IconButton(
+                                icon: Icon(Icons.share, size: iconButtonSize),
+                                constraints: BoxConstraints(
+                                  maxHeight: buttonSize,
+                                  maxWidth: buttonSize,
+                                ),
+                                padding: EdgeInsets.zero,
+                                onPressed: () {
+                                  _shareDocument(document);
+                                },
+                              ),
+                              IconButton(
+                                icon: Icon(Icons.delete, size: iconButtonSize),
+                                constraints: BoxConstraints(
+                                  maxHeight: buttonSize,
+                                  maxWidth: buttonSize,
+                                ),
+                                padding: EdgeInsets.zero,
+                                onPressed: () {
+                                  _deleteDocument(document);
+                                },
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-          ],
+              ],
+            );
+          },
         ),
       ),
     );
@@ -1462,6 +1513,34 @@ class _FoldersScreenState extends State<FoldersScreen> {
           size: 40,
           color: Colors.blue.shade800,
         );
+    }
+  }
+
+  // Helper function to get icon data for flexible sizing
+  IconData _getDocumentIconData(Document document) {
+    switch (document.type) {
+      case DocumentType.pdf:
+        return Icons.picture_as_pdf;
+      case DocumentType.csv:
+        return Icons.table_chart;
+      case DocumentType.docx:
+        return Icons.description;
+      default:
+        return Icons.insert_drive_file;
+    }
+  }
+
+  // Helper function to get icon color
+  Color _getDocumentIconColor(Document document) {
+    switch (document.type) {
+      case DocumentType.pdf:
+        return Colors.red.shade800;
+      case DocumentType.csv:
+        return Colors.green.shade800;
+      case DocumentType.docx:
+        return Colors.blue.shade800;
+      default:
+        return Colors.blue.shade800;
     }
   }
   
@@ -1744,6 +1823,8 @@ class _UploadFolderDialogState extends State<_UploadFolderDialog> {
 
   Future<void> _selectZipFile() async {
     try {
+      developer.log('Starting file selection', name: 'FolderUpload');
+      
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['zip'],
@@ -1752,14 +1833,17 @@ class _UploadFolderDialogState extends State<_UploadFolderDialog> {
 
       if (result != null) {
         final pickedFile = result.files.single;
+        developer.log('File selected: ${pickedFile.name}, size: ${pickedFile.size}', name: 'FolderUpload');
         
         if (kIsWeb) {
           // For web platform
           if (pickedFile.bytes == null) {
+            developer.log('Error: No bytes available for web platform', name: 'FolderUpload');
             _showError('Could not read file data on web platform');
             return;
           }
           
+          developer.log('Web platform: Setting bytes (${pickedFile.bytes!.length} bytes)', name: 'FolderUpload');
           setState(() {
             _selectedZipFile = null;
             _selectedZipBytes = pickedFile.bytes;
@@ -1768,10 +1852,12 @@ class _UploadFolderDialogState extends State<_UploadFolderDialog> {
         } else {
           // For other platforms
           if (pickedFile.path == null) {
+            developer.log('Error: No path available for native platform', name: 'FolderUpload');
             _showError('Could not get file path');
             return;
           }
           
+          developer.log('Native platform: Setting file path: ${pickedFile.path}', name: 'FolderUpload');
           setState(() {
             if (!kIsWeb) {
               io.File? newSelectedFile;
@@ -1786,8 +1872,13 @@ class _UploadFolderDialogState extends State<_UploadFolderDialog> {
             _selectedFileName = pickedFile.name;
           });
         }
+        
+        developer.log('File selection complete. File: ${_selectedFileName}, HasBytes: ${_selectedZipBytes != null}, HasFile: ${_selectedZipFile != null}', name: 'FolderUpload');
+      } else {
+        developer.log('No file selected by user', name: 'FolderUpload');
       }
     } catch (e) {
+      developer.log('Error selecting file: $e', name: 'FolderUpload');
       _showError('Error selecting file: $e');
     }
   }
@@ -1801,13 +1892,17 @@ class _UploadFolderDialogState extends State<_UploadFolderDialog> {
       Map<String, dynamic> data = {};
       
       if (widget.parentFolderId != null) {
-        data['parent_folder_id'] = widget.parentFolderId;
+        data['parent'] = widget.parentFolderId;
       }
 
       dynamic response;
       
+      developer.log('Starting folder upload with data: $data', name: 'FolderUpload');
+      developer.log('Platform: ${kIsWeb ? "Web" : "Native"}', name: 'FolderUpload');
+      
       if (kIsWeb && _selectedZipBytes != null) {
         // Web upload using bytes
+        developer.log('Web upload: fileName=$_selectedFileName, size=${_selectedZipBytes!.length}', name: 'FolderUpload');
         response = await _apiService.uploadFileFromBytes(
           '/manager/folder/upload/',
           _selectedZipBytes!,
@@ -1816,13 +1911,14 @@ class _UploadFolderDialogState extends State<_UploadFolderDialog> {
         );
       } else if (!kIsWeb && _selectedZipFile != null) {
         // Native platform upload using file
+        developer.log('Native upload: filePath=${FileUtils.getFilePath(_selectedZipFile)}', name: 'FolderUpload');
         response = await _apiService.uploadFile(
           '/manager/folder/upload/',
           _selectedZipFile!,
           data.map((key, value) => MapEntry(key, value.toString())),
         );
       } else {
-        throw Exception('No file selected or platform mismatch');
+        throw Exception('No file selected or platform mismatch. Web: ${kIsWeb}, bytes: ${_selectedZipBytes != null}, file: ${_selectedZipFile != null}');
       }
 
       // Success
@@ -1905,13 +2001,13 @@ class _ShareDialogState extends State<_ShareDialog> {
                     Expanded(
                       child: SelectableText(
                         _shareLink!,
-                        style: const TextStyle(fontSize: 12),
+                        style: const TextStyle(fontSize: 12, color: Colors.black),
                       ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.copy),
                       onPressed: () {
-                        // Copy to clipboard functionality would go here
+                        Clipboard.setData(ClipboardData(text: _shareLink!));
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('Link copied to clipboard!')),
                         );
@@ -1923,30 +2019,32 @@ class _ShareDialogState extends State<_ShareDialog> {
               const SizedBox(height: 16),
             ],
             
-            // Expiry date picker
-            Row(
-              children: [
-                const Text('Expires: '),
-                TextButton(
-                  onPressed: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: _expiryDate ?? DateTime.now().add(const Duration(days: 7)),
-                      firstDate: DateTime.now(),
-                      lastDate: DateTime.now().add(const Duration(days: 365)),
-                    );
-                    if (picked != null) {
-                      setState(() {
-                        _expiryDate = picked;
-                      });
-                    }
-                  },
-                  child: Text(
-                    _expiryDate?.toString().split(' ')[0] ?? 'Select Date',
+            // Expiry date picker - only show when creating new link
+            if (_shareLink == null) ...[
+              Row(
+                children: [
+                  const Text('Expires: '),
+                  TextButton(
+                    onPressed: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _expiryDate ?? DateTime.now().add(const Duration(days: 7)),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (picked != null) {
+                        setState(() {
+                          _expiryDate = picked;
+                        });
+                      }
+                    },
+                    child: Text(
+                      _expiryDate?.toString().split(' ')[0] ?? 'Select Date',
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -1988,10 +2086,9 @@ class _ShareDialogState extends State<_ShareDialog> {
       final response = await _apiService.post('/manager/share/', data, {});
       
       final token = response['token'];
-      final baseUrl = 'http://172.22.253.81:8000'; // TODO: Make this configurable
       
       setState(() {
-        _shareLink = '$baseUrl/api/manager/share/$token/';
+        _shareLink = '${API.baseUrl}/manager/share/$token/';
       });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(

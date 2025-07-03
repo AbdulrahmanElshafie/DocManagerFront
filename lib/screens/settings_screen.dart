@@ -25,6 +25,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isEditing = false;
   bool _notificationsEnabled = true;
   
+  // Helper to create safe TextStyles with consistent inherit values
+  TextStyle _safeTextStyle(BuildContext context, TextStyle? baseStyle, {
+    Color? color,
+    FontWeight? fontWeight,
+    double? fontSize,
+    FontStyle? fontStyle,
+    TextDecoration? decoration,
+  }) {
+    return (baseStyle ?? Theme.of(context).textTheme.bodyMedium!).copyWith(
+      color: color,
+      fontWeight: fontWeight,
+      fontSize: fontSize,
+      fontStyle: fontStyle,
+      decoration: decoration,
+      inherit: true, // Always ensure inherit is true
+    );
+  }
+  
   @override
   void initState() {
     super.initState();
@@ -82,6 +100,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: const ValueKey('settings_screen_scaffold'),
       appBar: AppBar(
         title: const Text('Settings'),
         actions: [
@@ -98,6 +117,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
       body: BlocConsumer<UserBloc, UserState>(
+        key: const ValueKey('settings_user_bloc_consumer'),
         listener: (context, state) {
           if (state is UserError) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -194,7 +214,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               Text(
                 'Profile Information',
-                style: Theme.of(context).textTheme.titleLarge,
+                style: _safeTextStyle(context, Theme.of(context).textTheme.titleLarge),
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -267,7 +287,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             Text(
               'Change Password',
-              style: Theme.of(context).textTheme.titleLarge,
+              style: _safeTextStyle(context, Theme.of(context).textTheme.titleLarge),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -320,7 +340,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             Text(
               'General Settings',
-              style: Theme.of(context).textTheme.titleLarge,
+              style: _safeTextStyle(context, Theme.of(context).textTheme.titleLarge),
             ),
             const SizedBox(height: 16),
             SwitchListTile(
