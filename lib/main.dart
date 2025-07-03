@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:doc_manager/blocs/bloc_providers.dart';
 import 'package:doc_manager/screens/main_screen.dart';
 import 'package:doc_manager/shared/providers/theme_provider.dart';
+import 'package:doc_manager/shared/utils/temp_file_manager.dart';
 
 void main() {
   // It's good practice to ensure Flutter bindings are initialized
@@ -166,12 +167,45 @@ class MyApp extends StatelessWidget {
             themeAnimationDuration: const Duration(milliseconds: 300),
             themeAnimationCurve: Curves.easeInOut,
             debugShowCheckedModeBanner: false,
-            home: const MainScreen(), // Use MainScreen as the initial screen
+            home: const AppLifecycleObserver(child: MainScreen()), // Use MainScreen as the initial screen
           );
         },
       ),
     );
   }
+}
+
+class AppLifecycleObserver extends StatefulWidget {
+  final Widget child;
+  const AppLifecycleObserver({required this.child, super.key});
+  
+  @override
+  State<AppLifecycleObserver> createState() => _AppLifecycleObserverState();
+}
+
+class _AppLifecycleObserverState extends State<AppLifecycleObserver> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+  
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    TempFileManager.cleanup();
+    super.dispose();
+  }
+  
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      TempFileManager.cleanup();
+    }
+  }
+  
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 // HomePage is no longer directly used as the entry but can be part of MainScreen later.

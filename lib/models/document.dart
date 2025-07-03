@@ -4,6 +4,8 @@ import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path/path.dart' as path;
 import '../shared/utils/file_utils.dart';
+import '../shared/network/api.dart';
+import 'validation_result.dart';
 
 enum DocumentType {
   pdf,
@@ -24,8 +26,7 @@ class Document extends Equatable {
   final DateTime createdAt;
   final DateTime? updatedAt;
 
-
-   Document({
+  Document({
     required this.id,
     required this.name,
     this.file,
@@ -38,65 +39,59 @@ class Document extends Equatable {
     this.updatedAt,
   });
 
+  // Platform-aware file path validator
+  static bool _isValidFilePath(String? path) {
+    if (path == null || path.isEmpty || path.trim() == 'path') {
+      return false;
+    }
+    
+    if (kIsWeb) {
+      // For web, accept URLs and basic validation
+      return path.startsWith('http') || path.startsWith('blob:') || path.isNotEmpty;
+    } else {
+      // For mobile/desktop, validate actual file paths
+      try {
+        final normalizedPath = path.replaceAll('\\', '/');
+        return normalizedPath.isNotEmpty && !normalizedPath.contains('//');
+      } catch (e) {
+        return false;
+      }
+    }
+  }
 
+  // Simplified fromJson method
   factory Document.fromJson(Map<String, dynamic> json) {
     developer.log('Parsing document JSON: $json', name: 'Document.fromJson');
     
+    // Validate input data
+    final validation = Document.validateDocument(json);
+    if (!validation.isValid) {
+      developer.log('Document validation failed: ${validation.errors}', name: 'Document.fromJson');
+      // Continue with defaults but log the issues
+    }
+    
     io.File? fileObj;
     String? filePathStr;
-
+    
+    // Extract file path from JSON
     if (json['file'] != null) {
-      try {
-        // Get the file path from the API response
-        final filePath = json['file'];
-        filePathStr = filePath is String ? filePath : null;
-        
-        // Only create a File object if we're not on web and path is valid
-        if (!kIsWeb && filePathStr != null && filePathStr.isNotEmpty) {
+      filePathStr = json['file'] is String ? json['file'] : null;
+      
+      // Validate file path
+      if (_isValidFilePath(filePathStr)) {
+        // Normalize path for non-web platforms
+        if (!kIsWeb && filePathStr != null) {
+          filePathStr = filePathStr.replaceAll('\\', '/');
           try {
-            // Normalize the file path for Windows (only on non-web platforms)
-            try {
-              if (!kIsWeb && filePathStr.contains('\\')) {
-                filePathStr = filePathStr.replaceAll('\\', '/');
-              }
-            } catch (e) {
-              developer.log('Error normalizing file path: $e', name: 'Document.fromJson');
-            }
-            
-            // Ensure the path isn't just the string "path" which can happen in error cases
-            if (filePathStr == "path" || (filePathStr?.trim().isEmpty ?? true)) {
-              developer.log('Invalid file path received: $filePathStr', name: 'Document.fromJson');
-              filePathStr = null;
-            } else {
-              // Create file object - web version needs different handling
-              if (kIsWeb) {
-                // For web, we'll store path but not create File object
-                developer.log('Web platform: storing file path without File object', name: 'Document.fromJson');
-              } else {
-                try {
-                  io.File? newFileObj;
-                  if (!kIsWeb) {
-                    newFileObj = io.File(filePathStr!);
-                  }
-                  fileObj = newFileObj;
-                  // Check if file exists to validate path - but don't throw if it doesn't
-                  if (fileObj != null && !FileUtils.existsSync(fileObj)) {
-                    developer.log('File does not exist at path: $filePathStr', name: 'Document.fromJson');
-                    // We'll still keep the fileObj and path, as it might be created later
-                  }
-                } catch (e) {
-                  developer.log('Error creating File object: $e', name: 'Document.fromJson');
-                  fileObj = null;
-                }
-              }
-            }
+            fileObj = io.File(filePathStr);
           } catch (e) {
-            developer.log('Error creating File object: $e', name: 'Document.fromJson');
+            developer.log('Could not create File object: $e', name: 'Document.fromJson');
             fileObj = null;
           }
         }
-      } catch (e) {
-        developer.log('Error handling file path: $e', name: 'Document.fromJson');
+      } else {
+        developer.log('Invalid file path: $filePathStr', name: 'Document.fromJson');
+        filePathStr = null;
       }
     }
     
@@ -114,8 +109,8 @@ class Document extends Equatable {
     }
     
     return Document(
-      id: json['id'] ?? '',
-      name: json['name'] ?? '',
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString().trim() ?? 'Unnamed Document',
       file: fileObj,
       filePath: filePathStr,
       fileUrl: json['file_url'],
@@ -125,6 +120,55 @@ class Document extends Equatable {
       folderId: json['folder']?.toString() ?? '',
       type: docType,
     );
+  }
+
+  // File validation method
+  bool hasValidFile() {
+    if (kIsWeb) {
+      return fileUrl != null && fileUrl!.isNotEmpty;
+    } else {
+      return file != null && FileUtils.existsSync(file!);
+    }
+  }
+
+  // Validation methods for Document
+  static ValidationResult validateDocument(Map<String, dynamic> json) {
+    final errors = <String>[];
+    
+    if (json['id'] == null || json['id'].toString().isEmpty) {
+      errors.add('Document ID is required');
+    }
+    
+    if (json['name'] == null || json['name'].toString().trim().isEmpty) {
+      errors.add('Document name is required');
+    }
+    
+    if (json['owner'] == null || json['owner'].toString().isEmpty) {
+      errors.add('Document owner is required');
+    }
+    
+    if (json['folder'] == null || json['folder'].toString().isEmpty) {
+      errors.add('Document folder is required');
+    }
+    
+    if (json['created_at'] == null) {
+      errors.add('Document creation date is required');
+    } else {
+      try {
+        DateTime.parse(json['created_at']);
+      } catch (e) {
+        errors.add('Invalid creation date format');
+      }
+    }
+    
+    return ValidationResult(isValid: errors.isEmpty, errors: errors);
+  }
+  
+  bool get isValid {
+    return id.isNotEmpty && 
+           name.trim().isNotEmpty && 
+           ownerId.isNotEmpty && 
+           folderId.isNotEmpty;
   }
 
   static DocumentType _parseDocumentType(String? typeStr) {
@@ -164,6 +208,19 @@ class Document extends Equatable {
       developer.log('Error inferring file type: $e', name: 'Document._inferTypeFromPath');
       return DocumentType.unsupported;
     }
+  }
+
+  // Helper method to get absolute file URL
+  String? getAbsoluteFileUrl() {
+    if (fileUrl != null && fileUrl!.isNotEmpty) {
+      if (fileUrl!.startsWith('http')) {
+        return fileUrl;
+      } else {
+        // Construct absolute URL from relative path
+        return '${API.baseUrl.replaceAll('/api', '')}$fileUrl';
+      }
+    }
+    return null;
   }
 
   Map<String, dynamic> toJson() => {
@@ -231,28 +288,6 @@ class Document extends Equatable {
       ownerId: '',
       createdAt: DateTime.now(),
     );
-  }
-
-  /// Get the absolute URL for the document file
-  String? getAbsoluteFileUrl() {
-    if (fileUrl != null) {
-      if (fileUrl!.startsWith('http')) {
-        return fileUrl;
-      } else {
-        // Prepend base API URL if it's a relative path
-        return 'http://localhost:8000$fileUrl';
-      }
-    }
-    
-    // Fallback to constructing URL from file path if fileUrl is not available
-    if (filePath != null) {
-      final url = filePath!.startsWith('http') 
-          ? filePath! 
-          : 'http://localhost:8000$filePath';
-      return url;
-    }
-    
-    return null;
   }
 
   @override
