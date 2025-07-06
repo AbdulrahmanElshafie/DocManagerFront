@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html';
 import 'package:doc_manager/models/document.dart';
 import 'package:doc_manager/repository/document_repository.dart';
 import 'package:doc_manager/shared/utils/logger.dart';

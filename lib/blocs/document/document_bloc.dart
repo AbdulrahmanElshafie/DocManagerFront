@@ -2,7 +2,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:doc_manager/blocs/document/document_event.dart';
 import 'package:doc_manager/blocs/document/document_state.dart';
 import 'package:doc_manager/repository/document_repository.dart';
+import 'package:doc_manager/models/document.dart';
 import 'package:doc_manager/shared/utils/logger.dart';
+import 'package:doc_manager/shared/utils/app_logger.dart';
 import 'dart:developer' as developer;
 
 class DocumentBloc extends Bloc<DocumentEvent, DocumentState> {
@@ -50,22 +52,23 @@ class DocumentBloc extends Bloc<DocumentEvent, DocumentState> {
   Future<void> _onCreateDocument(CreateDocument event, Emitter<DocumentState> emit) async {
     try {
       emit(const DocumentsLoading());
+      
+      // Perform all operations
       final document = await _documentRepository.createContentDocument(
-        name: event.name,
-        folderId: event.folderId,
-        content: event.content
+        event.folderId,
+        event.name,
+        event.content ?? ''
       );
       
-      // Re-fetch the documents to update the list
       final documents = await _documentRepository.getDocuments(
         folderId: event.folderId
       );
       
-      emit(DocumentCreated(document));
-      emit(DocumentsLoaded(documents));
-      emit(const DocumentOperationSuccess('Document created successfully'));
+      // Emit single combined state
+      emit(DocumentCreatedWithList(document: document, documents: documents));
+      
     } catch (error) {
-      LoggerUtil.error('Failed to create document: $error');
+      AppLogger.error('Failed to create document', name: 'DocumentBloc', error: error);
       emit(DocumentError('Failed to create document: $error'));
     }
   }
@@ -73,22 +76,23 @@ class DocumentBloc extends Bloc<DocumentEvent, DocumentState> {
   Future<void> _onAddDocument(AddDocument event, Emitter<DocumentState> emit) async {
     try {
       emit(const DocumentsLoading());
+      
+      // Perform all operations
       final document = await _documentRepository.createDocument(
         event.folderId ?? '', 
         event.file, 
         event.name
       );
       
-      // Re-fetch the documents to update the list
       final documents = await _documentRepository.getDocuments(
         folderId: event.folderId
       );
       
-      emit(DocumentCreated(document));
-      emit(DocumentsLoaded(documents));
-      emit(const DocumentOperationSuccess('Document created successfully'));
+      // Emit single combined state
+      emit(DocumentCreatedWithList(document: document, documents: documents));
+      
     } catch (error) {
-      LoggerUtil.error('Failed to create document: $error');
+      AppLogger.error('Failed to create document', name: 'DocumentBloc', error: error);
       emit(DocumentError('Failed to create document: $error'));
     }
   }
@@ -96,6 +100,8 @@ class DocumentBloc extends Bloc<DocumentEvent, DocumentState> {
   Future<void> _onAddDocumentFromBytes(AddDocumentFromBytes event, Emitter<DocumentState> emit) async {
     try {
       emit(const DocumentsLoading());
+      
+      // Perform all operations
       final document = await _documentRepository.createDocumentFromBytes(
         event.folderId ?? '', 
         event.fileBytes,
@@ -103,16 +109,15 @@ class DocumentBloc extends Bloc<DocumentEvent, DocumentState> {
         event.name
       );
       
-      // Re-fetch the documents to update the list
       final documents = await _documentRepository.getDocuments(
         folderId: event.folderId
       );
       
-      emit(DocumentCreated(document));
-      emit(DocumentsLoaded(documents));
-      emit(const DocumentOperationSuccess('Document created successfully'));
+      // Emit single combined state
+      emit(DocumentCreatedWithList(document: document, documents: documents));
+      
     } catch (error) {
-      LoggerUtil.error('Failed to create document from bytes: $error');
+      AppLogger.error('Failed to create document from bytes', name: 'DocumentBloc', error: error);
       emit(DocumentError('Failed to create document: $error'));
     }
   }
@@ -121,52 +126,74 @@ class DocumentBloc extends Bloc<DocumentEvent, DocumentState> {
     try {
       emit(const DocumentsLoading());
       
-      // Handle nullable parameters properly
+      // Validate required parameters
+      if (event.id.isEmpty) {
+        emit(const DocumentError('Document ID is required for update'));
+        return;
+      }
+      
+      if (event.name?.trim().isEmpty ?? true) {
+        emit(const DocumentError('Document name cannot be empty'));
+        return;
+      }
+      
+      // Use null values instead of empty strings
       final result = await _documentRepository.updateDocument(
         event.id,
-        event.folderId ?? "",  // Use empty string as a fallback
-        event.file,  // Repository should handle null file
-        event.name ?? "",  // Use empty string as a fallback
-        content: event.content
+        event.folderId?.isNotEmpty == true ? event.folderId! : null,
+        event.file,
+        event.name!.trim(),
+        content: event.content?.isNotEmpty == true ? event.content : null,
       );
       
       // Re-fetch the single document to show updated version
       final document = await _documentRepository.getDocument(event.id);
       
       // Re-fetch all documents if we have a folder ID
+      List<Document>? documents;
       if (event.folderId != null) {
-        final documents = await _documentRepository.getDocuments(
+        documents = await _documentRepository.getDocuments(
           folderId: event.folderId
         );
-        emit(DocumentsLoaded(documents));
       }
       
-      emit(DocumentUpdated(result));
-      emit(DocumentLoaded(document));
-      emit(const DocumentOperationSuccess('Document updated successfully'));
+      // Emit single combined state
+      emit(DocumentUpdatedWithList(
+        updateResult: result,
+        document: document,
+        documents: documents,
+      ));
+      
     } catch (error) {
-      LoggerUtil.error('Failed to update document: $error');
+      AppLogger.error('Failed to update document', name: 'DocumentBloc', error: error);
       emit(DocumentError('Failed to update document: $error'));
     }
   }
 
   Future<void> _onDeleteDocument(DeleteDocument event, Emitter<DocumentState> emit) async {
     try {
+      // Get current documents from state before making the delete request
+      List<Document> currentDocuments = [];
+      if (state is DocumentsLoaded) {
+        currentDocuments = (state as DocumentsLoaded).documents;
+      }
+      
       emit(const DocumentsLoading());
       final result = await _documentRepository.deleteDocument(event.id);
       
-      // Re-fetch the documents if we have a folder ID
-      if (event.folderId != null) {
-        final documents = await _documentRepository.getDocuments(
-          folderId: event.folderId
-        );
-        emit(DocumentsLoaded(documents));
-      }
+      // Instead of reloading from server, remove the deleted document from current state
+      final updatedDocuments = currentDocuments
+          .where((doc) => doc.id != event.id)
+          .toList();
       
-      emit(DocumentDeleted(result));
-      emit(const DocumentOperationSuccess('Document deleted successfully'));
+      // Emit optimized state with document removed from local list
+      emit(DocumentDeletedWithList(
+        deleteResult: result,
+        documents: updatedDocuments,
+      ));
+      
     } catch (error) {
-      LoggerUtil.error('Failed to delete document: $error');
+      AppLogger.error('Failed to delete document', name: 'DocumentBloc', error: error);
       emit(DocumentError('Failed to delete document: $error'));
     }
   }

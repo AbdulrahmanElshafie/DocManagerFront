@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/document.dart';
 import '../shared/utils/logger.dart';
 import '../shared/network/api_service.dart';
+import '../shared/utils/file_utils.dart';
 
 class VersionManagementWidget extends StatefulWidget {
   final Document document;
@@ -362,7 +363,7 @@ class VersionViewDialog extends StatelessWidget {
                     children: [
                       Text('Name: ${document.name}'),
                       Text('Type: ${document.type.name}'),
-                      Text('Size: ${document.file?.lengthSync() ?? 0} bytes'),
+                      Text('Size: ${document.file != null ? FileUtils.lengthSync(document.file!) : 0} bytes'),
                       const SizedBox(height: 8),
                       const Text(
                         'Note: This is a preview of the version. The actual file content is preserved.',

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:doc_manager/blocs/bloc_providers.dart';
-import 'package:doc_manager/screens/main_screen.dart'; // Import AuthWrapper
+import 'package:doc_manager/screens/main_screen.dart';
 import 'package:doc_manager/shared/providers/theme_provider.dart';
+import 'package:doc_manager/shared/utils/temp_file_manager.dart';
 
 void main() {
   // It's good practice to ensure Flutter bindings are initialized
@@ -12,6 +13,140 @@ void main() {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
+  // Normalize TextTheme to ensure consistent inherit values
+  TextTheme _normalizedTextTheme(TextTheme textTheme) {
+    return textTheme.copyWith(
+      displayLarge: textTheme.displayLarge?.copyWith(inherit: true),
+      displayMedium: textTheme.displayMedium?.copyWith(inherit: true),
+      displaySmall: textTheme.displaySmall?.copyWith(inherit: true),
+      headlineLarge: textTheme.headlineLarge?.copyWith(inherit: true),
+      headlineMedium: textTheme.headlineMedium?.copyWith(inherit: true),
+      headlineSmall: textTheme.headlineSmall?.copyWith(inherit: true),
+      titleLarge: textTheme.titleLarge?.copyWith(inherit: true),
+      titleMedium: textTheme.titleMedium?.copyWith(inherit: true),
+      titleSmall: textTheme.titleSmall?.copyWith(inherit: true),
+      bodyLarge: textTheme.bodyLarge?.copyWith(inherit: true),
+      bodyMedium: textTheme.bodyMedium?.copyWith(inherit: true),
+      bodySmall: textTheme.bodySmall?.copyWith(inherit: true),
+      labelLarge: textTheme.labelLarge?.copyWith(inherit: true),
+      labelMedium: textTheme.labelMedium?.copyWith(inherit: true),
+      labelSmall: textTheme.labelSmall?.copyWith(inherit: true),
+    );
+  }
+
+  ThemeData _buildLightTheme() {
+    final base = ThemeData(
+      primarySwatch: Colors.blue,
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: Colors.deepPurple,
+        brightness: Brightness.light,
+      ),
+      //  ─── TURN OFF ALL RIPPLE SPLASHES ───────────────────────────────
+      splashFactory: NoSplash.splashFactory,
+      highlightColor: Colors.transparent,
+      splashColor: Colors.transparent,
+    );
+    
+    return base.copyWith(
+      textTheme: _normalizedTextTheme(base.textTheme),
+      inputDecorationTheme: const InputDecorationTheme(
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(8.0)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(8.0)),
+          borderSide: BorderSide(color: Colors.deepPurple, width: 2.0),
+        ),
+        contentPadding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.deepPurple,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8.0),
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.deepPurple,
+        )
+      ),
+      appBarTheme: const AppBarTheme(
+        centerTitle: false,
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.deepPurple,
+        iconTheme: IconThemeData(color: Colors.deepPurple),
+      ),
+      cardTheme: CardTheme(
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+      ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: Colors.deepPurple,
+        foregroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+      ),
+      tabBarTheme: const TabBarTheme(
+        labelColor: Colors.deepPurple,
+        unselectedLabelColor: Colors.grey,
+        indicatorSize: TabBarIndicatorSize.label,
+      ),
+    );
+  }
+
+  ThemeData _buildDarkTheme() {
+    final base = ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: Colors.deepPurple,
+        brightness: Brightness.dark,
+      ),
+      //  ─── TURN OFF ALL RIPPLE SPLASHES ───────────────────────────────
+      splashFactory: NoSplash.splashFactory,
+      highlightColor: Colors.transparent,
+      splashColor: Colors.transparent,
+    );
+    
+    return base.copyWith(
+      textTheme: _normalizedTextTheme(base.textTheme),
+      inputDecorationTheme: const InputDecorationTheme(
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(8.0)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(8.0)),
+          borderSide: BorderSide(color: Colors.deepPurpleAccent, width: 2.0),
+        ),
+        contentPadding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.deepPurpleAccent,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8.0),
+          ),
+        ),
+      ),
+      cardTheme: CardTheme(
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+      ),
+    );
+  }
 
   // This widget is the root of your application.
   @override
@@ -25,110 +160,52 @@ class MyApp extends StatelessWidget {
         builder: (context, themeProvider, child) {
           return MaterialApp(
             title: 'Document Manager',
-            theme: ThemeData(
-              primarySwatch: Colors.blue,
-              useMaterial3: true,
-              // Define a more modern color scheme
-              colorScheme: ColorScheme.fromSeed(
-                seedColor: Colors.deepPurple,
-                brightness: Brightness.light,
-              ),
-              // Define consistent input decoration for text fields
-              inputDecorationTheme: const InputDecorationTheme(
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(8.0)),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(8.0)),
-                  borderSide: BorderSide(color: Colors.deepPurple, width: 2.0),
-                ),
-                contentPadding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-              ),
-              elevatedButtonTheme: ElevatedButtonThemeData(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepPurple,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
-                  textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8.0),
-                  ),
-                ),
-              ),
-              textButtonTheme: TextButtonThemeData(
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.deepPurple,
-                  textStyle: const TextStyle(fontWeight: FontWeight.w600)
-                )
-              ),
-              appBarTheme: const AppBarTheme(
-                centerTitle: false,
-                elevation: 0,
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.deepPurple,
-                iconTheme: IconThemeData(color: Colors.deepPurple),
-              ),
-              cardTheme: CardTheme(
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              floatingActionButtonTheme: FloatingActionButtonThemeData(
-                backgroundColor: Colors.deepPurple,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              tabBarTheme: const TabBarTheme(
-                labelColor: Colors.deepPurple,
-                unselectedLabelColor: Colors.grey,
-                indicatorSize: TabBarIndicatorSize.label,
-              ),
-            ),
-            darkTheme: ThemeData(
-              useMaterial3: true,
-              colorScheme: ColorScheme.fromSeed(
-                seedColor: Colors.deepPurple,
-                brightness: Brightness.dark,
-              ),
-              inputDecorationTheme: const InputDecorationTheme(
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(8.0)),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(8.0)),
-                  borderSide: BorderSide(color: Colors.deepPurpleAccent, width: 2.0),
-                ),
-                contentPadding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-              ),
-              elevatedButtonTheme: ElevatedButtonThemeData(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepPurpleAccent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
-                  textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8.0),
-                  ),
-                ),
-              ),
-              cardTheme: CardTheme(
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
+            theme: _buildLightTheme(),
+            darkTheme: _buildDarkTheme(),
             themeMode: themeProvider.themeMode,
+            // Restored smooth theme animation
+            themeAnimationDuration: const Duration(milliseconds: 300),
+            themeAnimationCurve: Curves.easeInOut,
             debugShowCheckedModeBanner: false,
-            home: const AuthWrapper(), // Use AuthWrapper as the initial screen
+            home: const AppLifecycleObserver(child: MainScreen()), // Use MainScreen as the initial screen
           );
         },
       ),
     );
   }
+}
+
+class AppLifecycleObserver extends StatefulWidget {
+  final Widget child;
+  const AppLifecycleObserver({required this.child, super.key});
+  
+  @override
+  State<AppLifecycleObserver> createState() => _AppLifecycleObserverState();
+}
+
+class _AppLifecycleObserverState extends State<AppLifecycleObserver> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+  
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    TempFileManager.cleanup();
+    super.dispose();
+  }
+  
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      TempFileManager.cleanup();
+    }
+  }
+  
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 // HomePage is no longer directly used as the entry but can be part of MainScreen later.

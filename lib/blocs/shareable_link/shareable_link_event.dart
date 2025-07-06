@@ -1,5 +1,4 @@
 import 'package:equatable/equatable.dart';
-import 'package:doc_manager/models/shareable_link.dart';
 
 abstract class ShareableLinkEvent extends Equatable {
   const ShareableLinkEvent();

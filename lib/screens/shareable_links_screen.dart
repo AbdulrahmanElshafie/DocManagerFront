@@ -5,11 +5,12 @@ import 'package:doc_manager/blocs/shareable_link/shareable_link_bloc.dart';
 import 'package:doc_manager/blocs/shareable_link/shareable_link_event.dart';
 import 'package:doc_manager/blocs/shareable_link/shareable_link_state.dart';
 import 'package:doc_manager/models/shareable_link.dart';
+import 'package:doc_manager/shared/network/api.dart';
 
 class ShareableLinksScreen extends StatefulWidget {
-  final String documentId;
+  final String? documentId; // Optional - if null, shows all links
   
-  const ShareableLinksScreen({super.key, required this.documentId});
+  const ShareableLinksScreen({super.key, this.documentId});
 
   @override
   State<ShareableLinksScreen> createState() => _ShareableLinksScreenState();
@@ -19,10 +20,42 @@ class _ShareableLinksScreenState extends State<ShareableLinksScreen> {
   DateTime? _expiryDate;
   String? _selectedPermissionType;
   
+  // Helper to create safe TextStyles with consistent inherit values
+  TextStyle _safeTextStyle(BuildContext context, TextStyle? baseStyle, {
+    Color? color,
+    FontWeight? fontWeight,
+    double? fontSize,
+    FontStyle? fontStyle,
+    TextDecoration? decoration,
+  }) {
+    return (baseStyle ?? Theme.of(context).textTheme.bodyMedium!).copyWith(
+      color: color,
+      fontWeight: fontWeight,
+      fontSize: fontSize,
+      fontStyle: fontStyle,
+      decoration: decoration,
+      inherit: true, // Always ensure inherit is true
+    );
+  }
+  
   @override
   void initState() {
     super.initState();
-    context.read<ShareableLinkBloc>().add(GetShareableLinks(resourceId: widget.documentId));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        if (widget.documentId != null) {
+          context.read<ShareableLinkBloc>().add(GetShareableLinks(resourceId: widget.documentId!));
+        } else {
+          // Load all shareable links
+          context.read<ShareableLinkBloc>().add(const LoadShareableLinks());
+        }
+      }
+    });
+  }
+  
+  @override
+  void dispose() {
+    super.dispose();
   }
   
   void _showCreateLinkDialog() {
@@ -93,15 +126,21 @@ class _ShareableLinksScreenState extends State<ShareableLinksScreen> {
             ),
             ElevatedButton(
               onPressed: () {
-                context.read<ShareableLinkBloc>().add(
-                  CreateShareableLink(
-                    resourceId: widget.documentId,
-                    permissionType: _selectedPermissionType!,
-                    expiresAt: _expiryDate!,
-                    documentId: widget.documentId,
-                  ),
-                );
-                Navigator.pop(context);
+                if (widget.documentId != null) {
+                  context.read<ShareableLinkBloc>().add(
+                    CreateShareableLink(
+                      resourceId: widget.documentId!,
+                      permissionType: _selectedPermissionType!,
+                      expiresAt: _expiryDate!,
+                      documentId: widget.documentId!,
+                    ),
+                  );
+                  Navigator.pop(context);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('No document selected')),
+                  );
+                }
               },
               child: const Text('Create'),
             ),
@@ -137,8 +176,9 @@ class _ShareableLinksScreenState extends State<ShareableLinksScreen> {
     );
   }
   
-  void _copyLinkToClipboard(String link) {
-    Clipboard.setData(ClipboardData(text: link));
+  void _copyLinkToClipboard(String token) {
+    final shareUrl = '${API.baseUrl}/manager/share/$token/';
+    Clipboard.setData(ClipboardData(text: shareUrl));
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Link copied to clipboard')),
     );
@@ -146,23 +186,33 @@ class _ShareableLinksScreenState extends State<ShareableLinksScreen> {
   
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Shareable Links'),
-      ),
-      body: BlocConsumer<ShareableLinkBloc, ShareableLinkState>(
+    return PopScope(
+      canPop: true,
+      child: Scaffold(
+        key: const ValueKey('shareable_links_screen_scaffold'),
+        appBar: AppBar(
+          title: const Text('Shareable Links'),
+          automaticallyImplyLeading: true,
+        ),
+        body: SafeArea(
+          child: BlocConsumer<ShareableLinkBloc, ShareableLinkState>(
+            key: const ValueKey('shareable_links_bloc_consumer'),
         listener: (context, state) {
           if (state is ShareableLinkError) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Error: ${state.error}')),
             );
-          } else if (state is ShareableLinkSuccess) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(state.message)),
-            );
-            // Refresh links after operation
-            context.read<ShareableLinkBloc>().add(GetShareableLinks(resourceId: widget.documentId));
-          }
+                      } else if (state is ShareableLinkSuccess) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(state.message)),
+              );
+              // Refresh links after operation
+              if (widget.documentId != null) {
+                context.read<ShareableLinkBloc>().add(GetShareableLinks(resourceId: widget.documentId!));
+              } else {
+                context.read<ShareableLinkBloc>().add(const LoadShareableLinks());
+              }
+            }
         },
         builder: (context, state) {
           if (state is ShareableLinkLoading) {
@@ -172,10 +222,14 @@ class _ShareableLinksScreenState extends State<ShareableLinksScreen> {
             
             if (links.isEmpty) {
               return Center(
+                key: const ValueKey('shareable_links_empty_state'),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text('No shareable links found'),
+                    Text(
+                      'No shareable links found',
+                      style: _safeTextStyle(context, Theme.of(context).textTheme.bodyLarge),
+                    ),
                     const SizedBox(height: 16),
                     ElevatedButton(
                       onPressed: _showCreateLinkDialog,
@@ -187,22 +241,25 @@ class _ShareableLinksScreenState extends State<ShareableLinksScreen> {
             }
             
             return Column(
+              key: const ValueKey('shareable_links_main_column'),
               children: [
                 Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Text(
                     'Manage shareable links for this document',
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: _safeTextStyle(context, Theme.of(context).textTheme.titleMedium),
                   ),
                 ),
                 Expanded(
                   child: ListView.builder(
+                    key: const ValueKey('shareable_links_listview'),
                     itemCount: links.length,
                     itemBuilder: (context, index) {
                       final link = links[index];
                       final isExpired = link.expiryDate.isBefore(DateTime.now());
                       
                       return Card(
+                        key: ValueKey('share_link_${link.id}'),
                         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         child: Padding(
                           padding: const EdgeInsets.all(16.0),
@@ -213,31 +270,36 @@ class _ShareableLinksScreenState extends State<ShareableLinksScreen> {
                                 children: [
                                   const Icon(Icons.link),
                                   const SizedBox(width: 8),
+                                  
+                                  // ← Prevent overflow when text metrics tween
                                   Expanded(
                                     child: Text(
-                                      link.token,
+                                      '${API.baseUrl}/manager/share/${link.token}/',
                                       overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: isExpired ? Colors.grey : null,
+                                      maxLines: 1,
+                                      style: _safeTextStyle(
+                                        context,
+                                        Theme.of(context).textTheme.bodyMedium,
+                                        color: isExpired 
+                                            ? Colors.grey 
+                                            : Theme.of(context).textTheme.bodyMedium?.color,
                                         decoration: isExpired ? TextDecoration.lineThrough : null,
                                       ),
                                     ),
                                   ),
+                                  
                                   IconButton(
                                     icon: const Icon(Icons.copy),
                                     onPressed: isExpired
                                         ? null
-                                        : () => _copyLinkToClipboard('https://example.com/share/${link.token}'),
+                                        : () => _copyLinkToClipboard(link.token),
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 8),
-                              Text('Permission: ${_formatPermissionType(link.permissionType)}'),
                               Text(
-                                'Expires: ${link.expiryDate.toString().split(' ')[0]}',
-                                style: TextStyle(
-                                  color: isExpired ? Colors.red : null,
-                                ),
+                                'Permission: ${_formatPermissionType(link.permissionType)}',
+                                style: _safeTextStyle(context, Theme.of(context).textTheme.bodySmall),
                               ),
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.end,
@@ -262,12 +324,21 @@ class _ShareableLinksScreenState extends State<ShareableLinksScreen> {
             );
           }
           
-          return const Center(child: Text('Select a document to manage shareable links'));
+          return Center(
+            key: const ValueKey('shareable_links_fallback_state'),
+            child: Text(
+              'Select a document to manage shareable links',
+              style: _safeTextStyle(context, Theme.of(context).textTheme.bodyLarge),
+            ),
+          );
         },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showCreateLinkDialog,
-        child: const Icon(Icons.add_link),
+          ),
+        ),
+        floatingActionButton: widget.documentId != null ? FloatingActionButton(
+          key: const ValueKey('shareable_links_fab'),
+          onPressed: _showCreateLinkDialog,
+          child: const Icon(Icons.add_link),
+        ) : null,
       ),
     );
   }

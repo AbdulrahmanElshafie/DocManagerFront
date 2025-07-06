@@ -1,8 +1,11 @@
-import 'dart:io';
+import 'dart:io' as io show File;
 import 'package:equatable/equatable.dart';
 import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path/path.dart' as path;
+import '../shared/utils/file_utils.dart';
+import '../shared/network/api.dart';
+import 'validation_result.dart';
 
 enum DocumentType {
   pdf,
@@ -14,67 +17,85 @@ enum DocumentType {
 class Document extends Equatable {
   final String id;
   final String name;
-  late File? file;
+  final io.File? file;
   final String? filePath;
+  final String? fileUrl;
   final DocumentType type;
   final String folderId;
   final String ownerId;
+  final String? ownerUsername;
+  final String? ownerEmail;
   final DateTime createdAt;
   final DateTime? updatedAt;
 
-
-   Document({
+  Document({
     required this.id,
     required this.name,
     this.file,
     this.filePath,
+    this.fileUrl,
     required this.type,
     required this.folderId,
     required this.ownerId,
+    this.ownerUsername,
+    this.ownerEmail,
     required this.createdAt,
     this.updatedAt,
   });
 
+  // Platform-aware file path validator
+  static bool _isValidFilePath(String? path) {
+    if (path == null || path.isEmpty || path.trim() == 'path') {
+      return false;
+    }
+    
+    if (kIsWeb) {
+      // For web, accept URLs and basic validation
+      return path.startsWith('http') || path.startsWith('blob:') || path.isNotEmpty;
+    } else {
+      // For mobile/desktop, validate actual file paths
+      try {
+        final normalizedPath = path.replaceAll('\\', '/');
+        return normalizedPath.isNotEmpty && !normalizedPath.contains('//');
+      } catch (e) {
+        return false;
+      }
+    }
+  }
 
+  // Simplified fromJson method
   factory Document.fromJson(Map<String, dynamic> json) {
     developer.log('Parsing document JSON: $json', name: 'Document.fromJson');
     
-    File? fileObj;
+    // Validate input data
+    final validation = Document.validateDocument(json);
+    if (!validation.isValid) {
+      developer.log('Document validation failed: ${validation.errors}', name: 'Document.fromJson');
+      // Continue with defaults but log the issues
+    }
+    
+    io.File? fileObj;
     String? filePathStr;
-
+    
+    // Extract file path from JSON
     if (json['file'] != null) {
-      try {
-        // Get the file path from the API response
-        final filePath = json['file'];
-        filePathStr = filePath is String ? filePath : null;
-        
-        // Only create a File object if we're not on web and path is valid
-        if (!kIsWeb && filePathStr != null && filePathStr.isNotEmpty) {
+      filePathStr = json['file'] is String ? json['file'] : null;
+      
+      // Validate file path
+      if (_isValidFilePath(filePathStr)) {
+        // Normalize path for non-web platforms
+        if (!kIsWeb && filePathStr != null) {
+          filePathStr = filePathStr.replaceAll('\\', '/');
           try {
-            // Normalize the file path for Windows
-            if (Platform.isWindows) {
-              filePathStr = filePathStr.replaceAll('\\', '/');
-            }
-            
-            // Ensure the path isn't just the string "path" which can happen in error cases
-            if (filePathStr == "path" || filePathStr.trim().isEmpty) {
-              developer.log('Invalid file path received: $filePathStr', name: 'Document.fromJson');
-              filePathStr = null;
-            } else {
-              fileObj = File(filePathStr);
-              // Check if file exists to validate path - but don't throw if it doesn't
-              if (!fileObj.existsSync()) {
-                developer.log('File does not exist at path: $filePathStr', name: 'Document.fromJson');
-                // We'll still keep the fileObj and path, as it might be created later
-              }
-            }
+            fileObj = io.File(filePathStr);
           } catch (e) {
-            developer.log('Error creating File object: $e', name: 'Document.fromJson');
+            developer.log('Could not create File object: $e', name: 'Document.fromJson');
             fileObj = null;
           }
         }
-      } catch (e) {
-        developer.log('Error handling file path: $e', name: 'Document.fromJson');
+      } else {
+        developer.log('Invalid file path: $filePathStr', name: 'Document.fromJson');
+        filePathStr = null;
       }
     }
     
@@ -82,26 +103,78 @@ class Document extends Equatable {
     DocumentType docType = _parseDocumentType(json['type']);
     
     // Then try to infer from the file path if available
-    if ((docType == DocumentType.unsupported || docType == null) && filePathStr != null) {
+    if (docType == DocumentType.unsupported && filePathStr != null) {
       docType = _inferTypeFromPath(filePathStr);
     }
     
     // Finally, try to infer from the name as a last resort
-    if ((docType == DocumentType.unsupported || docType == null) && json['name'] != null) {
+    if (docType == DocumentType.unsupported && json['name'] != null) {
       docType = _inferTypeFromPath(json['name']);
     }
     
     return Document(
-      id: json['id'] ?? '',
-      name: json['name'] ?? '',
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString().trim() ?? 'Unnamed Document',
       file: fileObj,
       filePath: filePathStr,
+      fileUrl: json['file_url'],
       ownerId: json['owner']?.toString() ?? '',
+      ownerUsername: json['owner_details']?['username'],
+      ownerEmail: json['owner_details']?['email'],
       createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
       updatedAt: json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null,
       folderId: json['folder']?.toString() ?? '',
       type: docType,
     );
+  }
+
+  // File validation method
+  bool hasValidFile() {
+    if (kIsWeb) {
+      return fileUrl != null && fileUrl!.isNotEmpty;
+    } else {
+      return file != null && FileUtils.existsSync(file!);
+    }
+  }
+
+  // Validation methods for Document
+  static ValidationResult validateDocument(Map<String, dynamic> json) {
+    final errors = <String>[];
+    
+    if (json['id'] == null || json['id'].toString().isEmpty) {
+      errors.add('Document ID is required');
+    }
+    
+    if (json['name'] == null || json['name'].toString().trim().isEmpty) {
+      errors.add('Document name is required');
+    }
+    
+    if (json['owner'] == null || json['owner'].toString().isEmpty) {
+      errors.add('Document owner is required');
+    }
+    
+    if (json['folder'] == null || json['folder'].toString().isEmpty) {
+      errors.add('Document folder is required');
+    }
+    
+    if (json['created_at'] == null) {
+      errors.add('Document creation date is required');
+    } else {
+      try {
+        DateTime.parse(json['created_at']);
+      } catch (e) {
+        errors.add('Invalid creation date format');
+      }
+    }
+    
+    return ValidationResult(isValid: errors.isEmpty, errors: errors);
+  }
+  
+  bool get isValid {
+    return id.isNotEmpty && 
+           name.trim().isNotEmpty && 
+           ownerId.isNotEmpty && 
+           folderId.isNotEmpty;
   }
 
   static DocumentType _parseDocumentType(String? typeStr) {
@@ -143,10 +216,23 @@ class Document extends Equatable {
     }
   }
 
+  // Helper method to get absolute file URL
+  String? getAbsoluteFileUrl() {
+    if (fileUrl != null && fileUrl!.isNotEmpty) {
+      if (fileUrl!.startsWith('http')) {
+        return fileUrl;
+      } else {
+        // Construct absolute URL from relative path
+        return '${API.baseUrl.replaceAll('/api', '')}$fileUrl';
+      }
+    }
+    return null;
+  }
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
-    'file': filePath ?? file?.path,
+    'file': filePath ?? FileUtils.getFilePath(file),
     'owner': ownerId,
     'created_at': createdAt.toIso8601String(),
     'updated_at': updatedAt?.toIso8601String(),
@@ -157,11 +243,14 @@ class Document extends Equatable {
   Document copyWith({
     String? id,
     String? name,
-    File? file,
+    io.File? file,
     String? filePath,
+    String? fileUrl,
     DocumentType? type,
     String? folderId,
     String? ownerId,
+    String? ownerUsername,
+    String? ownerEmail,
     DateTime? createdAt,
     DateTime? lastModified,
     DateTime? updatedAt,
@@ -172,9 +261,12 @@ class Document extends Equatable {
       name: name ?? this.name,
       file: file ?? this.file,
       filePath: filePath ?? this.filePath,
+      fileUrl: fileUrl ?? this.fileUrl,
       type: type ?? this.type,
       folderId: folderId ?? this.folderId,
       ownerId: ownerId ?? this.ownerId,
+      ownerUsername: ownerUsername ?? this.ownerUsername,
+      ownerEmail: ownerEmail ?? this.ownerEmail,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -214,9 +306,12 @@ class Document extends Equatable {
         name,
         file,
         filePath,
+        fileUrl,
         type,
         folderId,
         ownerId,
+        ownerUsername,
+        ownerEmail,
         createdAt,
         updatedAt,
       ];

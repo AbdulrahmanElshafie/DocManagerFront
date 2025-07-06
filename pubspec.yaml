@@ -43,45 +43,37 @@ dependencies:
   # Storage and persistence
   flutter_secure_storage: ^9.0.0
   shared_preferences: ^2.2.1
-  path_provider: ^2.1.1
+  path_provider: ^2.1.5
   
   # Networking
-  http: ^1.1.0
+  http: ^1.4.0
   http_parser: ^4.0.2
   dio: ^5.3.2
   
   # Utils
   intl: ^0.18.1
   logger: ^2.0.1
-  file_picker: ^5.5.0
+  file_picker: ^8.1.2
   path: ^1.8.3
   share_plus: ^7.1.0
-  url_launcher: ^6.1.14
-  uuid: ^4.0.0  # Required by super_editor
-  
+  url_launcher: ^6.3.1
+
   # UI components
-  flutter_markdown: ^0.6.17
   cached_network_image: ^3.3.0
   flutter_svg: ^2.0.7
+  data_table_2: ^2.6.0
   
   # Document viewers and editors - Updated versions
-  syncfusion_flutter_pdfviewer: ^27.1.57
-  syncfusion_flutter_pdf: ^27.1.57
-  syncfusion_flutter_core: ^27.1.57
-  syncfusion_flutter_datagrid: ^27.1.57
-  syncfusion_flutter_xlsio: ^27.1.57
-  docx_template: ^0.3.4
-  excel: ^2.1.0
-  csv: ^5.0.2
-  super_editor: ^0.3.0-dev.23
+  syncfusion_flutter_pdfviewer: ^26.2.14
+  syncfusion_flutter_pdf: ^26.2.14
+  syncfusion_flutter_core: ^26.2.14
   
-  # Document conversion
-  html: ^0.15.4
-  markdown: ^7.1.1
-  web_socket_channel: ^2.4.0
+
   
   # Provider
   provider: ^6.0.5
+  docx_viewer: ^0.2.1
+  csv: ^6.0.0
 
 dev_dependencies:
   flutter_test:

@@ -1,5 +1,4 @@
 import 'package:equatable/equatable.dart';
-import 'package:doc_manager/models/version.dart';
 
 abstract class VersionEvent extends Equatable {
   const VersionEvent();

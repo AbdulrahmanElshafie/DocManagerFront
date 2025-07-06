@@ -1,6 +1,5 @@
-import 'dart:io';
+import 'dart:io' as io show File;
 import 'package:equatable/equatable.dart';
-import 'package:doc_manager/models/document.dart';
 
 abstract class DocumentEvent extends Equatable {
   const DocumentEvent();
@@ -45,7 +44,7 @@ class CreateDocument extends DocumentEvent {
 
 class AddDocument extends DocumentEvent {
   final String? folderId;
-  final File file;
+  final io.File file;
   final String name;
   
   const AddDocument({
@@ -78,7 +77,7 @@ class AddDocumentFromBytes extends DocumentEvent {
 class UpdateDocument extends DocumentEvent {
   final String id;
   final String? folderId;
-  final File? file;
+  final io.File? file;
   final String? name;
   final String? content;
   

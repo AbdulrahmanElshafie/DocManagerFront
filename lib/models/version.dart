@@ -1,6 +1,10 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html';
+import 'dart:io' as io show File;
 import 'package:doc_manager/models/document.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import '../shared/utils/file_utils.dart';
+import 'package:intl/intl.dart';
+import 'document.dart';
 
 class Version extends Document {
   final String versionId;
@@ -19,9 +23,12 @@ class Version extends Document {
     required super.name,
     super.file,
     super.filePath,
+    super.fileUrl,
     required super.type,
     required super.folderId,
     required super.ownerId,
+    super.ownerUsername,
+    super.ownerEmail,
     required super.createdAt,
     super.updatedAt,
     this.lastModified,
@@ -29,7 +36,7 @@ class Version extends Document {
   });
 
   factory Version.fromJson(Map<String, dynamic> json) {
-    File? fileObj;
+    io.File? fileObj;
     String? filePathStr;
     
     if (json['file'] != null) {
@@ -39,7 +46,11 @@ class Version extends Document {
       // Only create a File object if we're not on web and path is valid
       if (!kIsWeb && filePathStr != null && filePathStr.isNotEmpty) {
         try {
-          fileObj = File(filePathStr);
+          io.File? newFileObj;
+          if (!kIsWeb) {
+            newFileObj = io.File(filePathStr);
+          }
+          fileObj = newFileObj;
         } catch (e) {
           print('Error creating File object: $e');
         }
@@ -61,9 +72,12 @@ class Version extends Document {
       name: json['name'],
       file: fileObj,
       filePath: filePathStr,
+      fileUrl: json['file_url'],
       type: _parseDocumentType(json['type']),
       folderId: json['folderId'] ?? json['folder'],
       ownerId: json['ownerId'] ?? json['owner'] ?? '',
+      ownerUsername: json['owner_details']?['username'],
+      ownerEmail: json['owner_details']?['email'],
       createdAt: json['createdAt'] != null ? DateTime.parse(json['createdAt']) : 
                  json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
       updatedAt: json['updatedAt'] != null ? DateTime.parse(json['updatedAt']) : 
@@ -109,11 +123,14 @@ class Version extends Document {
   Version copyWith({
     String? id,
     String? name,
-    File? file,
+    io.File? file,
     String? filePath,
+    String? fileUrl,
     DocumentType? type,
     String? folderId,
     String? ownerId,
+    String? ownerUsername,
+    String? ownerEmail,
     DateTime? createdAt,
     DateTime? updatedAt,
     DateTime? lastModified,
@@ -128,9 +145,12 @@ class Version extends Document {
       name: name ?? this.name,
       file: file ?? this.file,
       filePath: filePath ?? this.filePath,
+      fileUrl: fileUrl ?? this.fileUrl,
       type: type ?? this.type,
       folderId: folderId ?? this.folderId,
       ownerId: ownerId ?? this.ownerId,
+      ownerUsername: ownerUsername ?? this.ownerUsername,
+      ownerEmail: ownerEmail ?? this.ownerEmail,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       lastModified: lastModified ?? this.lastModified,

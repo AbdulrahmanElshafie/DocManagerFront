@@ -1,19 +1,23 @@
-import 'dart:io';
 import 'package:doc_manager/shared/network/api_service.dart';
 import 'package:doc_manager/shared/network/api.dart';
 import 'package:doc_manager/models/document.dart';
 import 'dart:developer' as developer;
-import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:convert';
 import 'package:path/path.dart' as path;
-import 'package:http/http.dart' as http;
+import '../shared/utils/file_utils.dart';
+import '../shared/utils/temp_file_manager.dart';
+import '../shared/utils/app_logger.dart';
+import '../shared/exceptions/app_exceptions.dart';
+
+// Platform-specific File class handling
+import 'dart:io' as io show File;
 
 class DocumentRepository {
   final ApiService _apiService = ApiService();
 
   Future<Document> createDocument(
-      String folderId, File file, String name) async {
+      String folderId, io.File file, String name) async {
     try {
       // Check if running on web platform
       if (kIsWeb) {
@@ -30,7 +34,8 @@ class DocumentRepository {
       }
       
       // Check if file extension is allowed
-      final fileExt = path.extension(file.path).toLowerCase();
+      final filePath = FileUtils.getFilePath(file) ?? 'unknown';
+      final fileExt = path.extension(filePath).toLowerCase();
       if (fileExt != '.pdf' && fileExt != '.csv' && fileExt != '.docx') {
         throw Exception('Only PDF, CSV, and DOCX files are supported.');
       }
@@ -38,36 +43,31 @@ class DocumentRepository {
       // Verify file exists and is readable
       bool fileExists = false;
       try {
-        fileExists = file.existsSync();
+        fileExists = FileUtils.existsSync(file);
       } catch (e) {
         developer.log('Error checking if file exists: $e', name: 'DocumentRepository');
       }
       
       if (!fileExists) {
-        throw Exception('File does not exist at path: ${file.path}');
+        throw Exception('File does not exist at path: $filePath');
       }
       
       // Get file stats
-      final fileSize = await file.length();
-      final fileStat = await file.stat();
+      final fileSize = await FileUtils.getFileSize(file);
       
       // Log the file information
-      developer.log('Creating document from file: ${file.path} with name: $name', name: 'DocumentRepository');
-      developer.log('File exists: ${file.existsSync()}', name: 'DocumentRepository');
-      developer.log('File size: $fileSize bytes, Last modified: ${fileStat.modified}', name: 'DocumentRepository');
+      developer.log('Creating document from file: $filePath with name: $name', name: 'DocumentRepository');
+      developer.log('File exists: ${FileUtils.existsSync(file)}', name: 'DocumentRepository');
+      developer.log('File size: $fileSize bytes', name: 'DocumentRepository');
       
       // If file is too large (> 10MB), make a copy with reduced size if possible
       if (fileSize > 10 * 1024 * 1024) {
         developer.log('File is large (${fileSize / (1024 * 1024)} MB), might cause upload issues', name: 'DocumentRepository');
       }
       
-      // Try to create a local copy in temp directory
-      Directory? tempDir;
-      try {
-        tempDir = await getTemporaryDirectory();
-      } catch (e) {
-        developer.log('Error getting temporary directory: $e, will use original file path', name: 'DocumentRepository');
-        // If we can't get temp directory, just use the original file
+      // Try to create a local copy in temp directory (only on non-web platforms)
+      if (kIsWeb) {
+        developer.log('Web platform detected, skipping temp directory operations', name: 'DocumentRepository');
         final response = await _apiService.uploadFile(
           API.document, 
           file,
@@ -84,13 +84,16 @@ class DocumentRepository {
         return Document.fromJson(response);
       }
       
-      final fileName = path.basename(file.path);
-      final tempFile = File('${tempDir.path}/$fileName');
+      final fileName = FileUtils.getFileName(file);
+      io.File? tempFile;
       
       try {
+        // Use TempFileManager to create temporary file
+        tempFile = await TempFileManager.createTempFile(fileName);
+        
         // Copy file to temp directory to avoid path issues
-        await file.copy(tempFile.path);
-        developer.log('Created temp copy at: ${tempFile.path}', name: 'DocumentRepository');
+        await FileUtils.copyFile(file, FileUtils.getFilePath(tempFile)!);
+        developer.log('Created temp copy at: ${FileUtils.getFilePath(tempFile)}', name: 'DocumentRepository');
         
         // Use the temp file for upload
         final response = await _apiService.uploadFile(
@@ -101,7 +104,7 @@ class DocumentRepository {
             'name': name,
           }
         );
-        
+      
         if (response == null || response.isEmpty) {
           throw Exception('Empty response received when creating document');
         }
@@ -129,6 +132,11 @@ class DocumentRepository {
         }
         
         return Document.fromJson(response);
+      } finally {
+        // Cleanup temp file
+        if (tempFile != null) {
+          await TempFileManager.cleanupFile(FileUtils.getFilePath(tempFile)!);
+        }
       }
     } catch (e) {
       developer.log('Error creating document: $e', name: 'DocumentRepository');
@@ -157,18 +165,8 @@ class DocumentRepository {
   }
 
   // This method creates a document with content in the appropriate supported format
-  Future<Document> createContentDocument({
-    required String name,
-    String? folderId,
-    String? content
-  }) async {
+  Future<Document> createContentDocument(String? folderId, String name, String content) async {
     try {
-      if (content == null || content.isEmpty) {
-        throw Exception('Content cannot be empty');
-      }
-
-      developer.log('Creating content document name: $name', name: 'DocumentRepository');
-      
       // Use PDF as default format
       String fileExtension = '.pdf';
       DocumentType documentType = DocumentType.pdf;
@@ -189,21 +187,21 @@ class DocumentRepository {
       
       // For non-web platforms, we need to create a temporary file
       if (!kIsWeb) {
+        io.File? tempFile;
         try {
-          final directory = await getTemporaryDirectory();
           final fileName = name.contains('.') ? name : '$name$fileExtension';
-          final file = File('${directory.path}/$fileName');
+          tempFile = await TempFileManager.createTempFile(fileName);
           
           // Write content to the file
-          await file.writeAsString(content);
+          await FileUtils.writeAsString(tempFile, content);
           
           // Log file creation
-          developer.log('Created temporary file at: ${file.path}', name: 'DocumentRepository');
-          developer.log('File exists: ${file.existsSync()}', name: 'DocumentRepository');
-          developer.log('File size: ${await file.length()} bytes', name: 'DocumentRepository');
+          developer.log('Created temporary file at: ${FileUtils.getFilePath(tempFile)}', name: 'DocumentRepository');
+          developer.log('File exists: ${FileUtils.existsSync(tempFile)}', name: 'DocumentRepository');
+          developer.log('File size: ${await FileUtils.getFileSize(tempFile)} bytes', name: 'DocumentRepository');
           
           try {
-            return await createDocument(folderId ?? '', file, name);
+            return await createDocument(folderId ?? '', tempFile, name);
           } catch (e) {
             developer.log('Error in createDocument: $e', name: 'DocumentRepository');
             
@@ -233,6 +231,11 @@ class DocumentRepository {
           developer.log('Falling back to direct API call with data: $map', name: 'DocumentRepository');
           final response = await _apiService.post(API.document, map, {});
           return Document.fromJson(response);
+        } finally {
+          // Cleanup temp file
+          if (tempFile != null) {
+            await TempFileManager.cleanupFile(FileUtils.getFilePath(tempFile)!);
+          }
         }
       } else {
         // For web, use the API to create a document with content
@@ -294,59 +297,88 @@ class DocumentRepository {
   }
 
   Future<Map<String, dynamic>> updateDocument(
-      String id, String folderId, File? file, String name, {String? content}) async {
+      String id, String? folderId, io.File? file, String name, {String? content}) async {
     try {
+      // Validate required parameters
+      if (id.isEmpty) {
+        throw ValidationException('Document ID is required');
+      }
+      
+      if (name.trim().isEmpty) {
+        throw ValidationException('Document name cannot be empty');
+      }
+      
       // Case 1: File is provided directly
       if (file != null) {
         // Check file extension
-        final fileExt = path.extension(file.path).toLowerCase();
+        final filePath = FileUtils.getFilePath(file) ?? 'unknown';
+        final fileExt = path.extension(filePath).toLowerCase();
         if (fileExt != '.pdf' && fileExt != '.csv' && fileExt != '.docx') {
-          throw Exception('Only PDF, CSV, and DOCX files are supported.');
+          throw ValidationException('Only PDF, CSV, and DOCX files are supported.');
         }
         
         // Log file information
-        developer.log('Updating document with file: ${file.path} with name: $name', name: 'DocumentRepository');
-        developer.log('File exists: ${file.existsSync()}', name: 'DocumentRepository');
+        AppLogger.debug('Updating document with file: $filePath with name: $name', name: 'DocumentRepository');
+        AppLogger.debug('File exists: ${FileUtils.existsSync(file)}', name: 'DocumentRepository');
+        
+        // Build update data with only non-null values
+        final updateData = <String, String>{
+          'name': name.trim(),
+        };
+        
+        if (folderId != null) {
+          updateData['folder'] = folderId;
+        }
         
         return await _apiService.updateFile(
           API.document,
           id,
           file,
-          {
-            'folder': folderId,
-            'name': name,
-          }
+          updateData
         );
       } 
       // Case 2: Content is provided, need to create a file with appropriate extension
       else if (content != null && !kIsWeb) {
-        final directory = await getTemporaryDirectory();
+        io.File? tempFile;
+        try {
+          // Use appropriate extension based on current document name or default to PDF
+          String fileExtension = '.pdf';
+          if (name.toLowerCase().endsWith('.csv')) {
+            fileExtension = '.csv';
+          } else if (name.toLowerCase().endsWith('.docx')) {
+            fileExtension = '.docx';
+          }
+          
+          final fileName = name.contains('.') ? name : '$name$fileExtension';
+          tempFile = await TempFileManager.createTempFile(fileName);
+          
+          await FileUtils.writeAsString(tempFile, content);
+          
+          // Log file creation
+          developer.log('Created temporary file for update at: ${FileUtils.getFilePath(tempFile)}', name: 'DocumentRepository');
+          developer.log('File exists: ${FileUtils.existsSync(tempFile)}', name: 'DocumentRepository');
+          
+                  // Build update data with only non-null values
+        final updateFields = <String, String>{
+          'name': name.trim(),
+        };
         
-        // Use appropriate extension based on current document name or default to PDF
-        String fileExtension = '.pdf';
-        if (name.toLowerCase().endsWith('.csv')) {
-          fileExtension = '.csv';
-        } else if (name.toLowerCase().endsWith('.docx')) {
-          fileExtension = '.docx';
+        if (folderId != null) {
+          updateFields['folder'] = folderId;
         }
-        
-        final fileName = name.contains('.') ? name : '$name$fileExtension';
-        final tempFile = File('${directory.path}/$fileName');
-        await tempFile.writeAsString(content);
-        
-        // Log file creation
-        developer.log('Created temporary file for update at: ${tempFile.path}', name: 'DocumentRepository');
-        developer.log('File exists: ${tempFile.existsSync()}', name: 'DocumentRepository');
         
         return await _apiService.updateFile(
           API.document,
           id,
           tempFile,
-          {
-            'folder': folderId,
-            'name': name,
-          }
+          updateFields
         );
+        } finally {
+          // Cleanup temp file
+          if (tempFile != null) {
+            await TempFileManager.cleanupFile(FileUtils.getFilePath(tempFile)!);
+          }
+        }
       }
       // Case 3: Web platform with content
       else if (kIsWeb && content != null) {
@@ -358,26 +390,38 @@ class DocumentRepository {
           fileExtension = '.docx';
         }
         
+        // Build update data with only non-null values
+        final updateFields = <String, String>{
+          'name': name,
+        };
+        
+        if (folderId != null) {
+          updateFields['folder'] = folderId;
+        }
+        
         return await _apiService.updateFileFromBytes(
           API.document,
           id,
           utf8.encode(content),
           name.contains('.') ? name : '$name$fileExtension',
-          {
-            'folder': folderId,
-            'name': name,
-          }
+          updateFields
         );
       }
       // Case 4: Just updating metadata, no content or file change
       else {
-        return await _apiService.put(API.document, {
-          'folder': folderId,
-          'name': name,
-        }, id);
+        // Build update data with only non-null values
+        final updateData = <String, dynamic>{
+          'name': name.trim(),
+        };
+        
+        if (folderId != null) {
+          updateData['folder'] = folderId;
+        }
+        
+        return await _apiService.put(API.document, updateData, id);
       }
     } catch (e) {
-      developer.log('Error updating document: $e', name: 'DocumentRepository');
+      AppLogger.error('Error updating document', name: 'DocumentRepository', error: e);
       rethrow;
     }
   }
