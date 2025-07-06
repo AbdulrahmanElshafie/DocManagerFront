@@ -6,6 +6,8 @@ A comprehensive document management application built with Flutter, featuring ad
 
 DocManager is a cross-platform document management system that allows users to upload, organize, view, and share documents seamlessly. The app provides native-like experiences across Android, iOS, Web, and Desktop platforms with robust document viewing capabilities and intuitive folder organization.
 
+> **Note**: This application was developed by incorporating vibe coding techniques using Cursor IDE, enabling high-quality results and rapid development in a remarkably short amount of time.
+
 ## ✨ Features
 
 ### 🔐 Authentication & User Management
@@ -180,10 +182,6 @@ lib/
 3. Commit your changes
 4. Push to the branch
 5. Create a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## 🆘 Support
 
