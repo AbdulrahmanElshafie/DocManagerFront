@@ -23,6 +23,8 @@ class Document extends Equatable {
   final DocumentType type;
   final String folderId;
   final String ownerId;
+  final String? ownerUsername;
+  final String? ownerEmail;
   final DateTime createdAt;
   final DateTime? updatedAt;
 
@@ -35,6 +37,8 @@ class Document extends Equatable {
     required this.type,
     required this.folderId,
     required this.ownerId,
+    this.ownerUsername,
+    this.ownerEmail,
     required this.createdAt,
     this.updatedAt,
   });
@@ -115,6 +119,8 @@ class Document extends Equatable {
       filePath: filePathStr,
       fileUrl: json['file_url'],
       ownerId: json['owner']?.toString() ?? '',
+      ownerUsername: json['owner_details']?['username'],
+      ownerEmail: json['owner_details']?['email'],
       createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
       updatedAt: json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null,
       folderId: json['folder']?.toString() ?? '',
@@ -243,6 +249,8 @@ class Document extends Equatable {
     DocumentType? type,
     String? folderId,
     String? ownerId,
+    String? ownerUsername,
+    String? ownerEmail,
     DateTime? createdAt,
     DateTime? lastModified,
     DateTime? updatedAt,
@@ -257,6 +265,8 @@ class Document extends Equatable {
       type: type ?? this.type,
       folderId: folderId ?? this.folderId,
       ownerId: ownerId ?? this.ownerId,
+      ownerUsername: ownerUsername ?? this.ownerUsername,
+      ownerEmail: ownerEmail ?? this.ownerEmail,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -300,6 +310,8 @@ class Document extends Equatable {
         type,
         folderId,
         ownerId,
+        ownerUsername,
+        ownerEmail,
         createdAt,
         updatedAt,
       ];

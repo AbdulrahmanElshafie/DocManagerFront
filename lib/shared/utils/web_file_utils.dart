@@ -26,7 +26,7 @@ class WebFileUtils {
   
   static DateTime getLastModified(html.File file) {
     return file.lastModified != null 
-        ? DateTime.fromMillisecondsSinceEpoch(file.lastModified!.millisecondsSinceEpoch)
+        ? DateTime.fromMillisecondsSinceEpoch(file.lastModified!)
         : DateTime.now();
   }
   

@@ -609,15 +609,27 @@ class ApiService {
 
   Future<List<int>> downloadFile(String url) async {
     AppLogger.debug('DOWNLOAD FILE REQUEST: $url', name: 'ApiService');
+    final headers = await _getHeaders();
     
-    final response = await http.get(Uri.parse(url));
+    // Add headers to explicitly request binary data
+    final downloadHeaders = {
+      ...headers,
+      'Accept': 'application/octet-stream, */*',
+      'Content-Type': 'application/octet-stream',
+    };
+    
+    final response = await http.get(
+      Uri.parse(url), 
+      headers: downloadHeaders,
+    );
     
     AppLogger.debug('DOWNLOAD FILE RESPONSE (${response.statusCode}): ${response.bodyBytes.length} bytes', name: 'ApiService');
 
     if (response.statusCode == 200) {
+      // Return the raw bytes - this preserves the binary data
       return response.bodyBytes;
     } else {
-      throw Exception('Failed to download file: ${response.statusCode}');
+      throw Exception('Failed to download file: ${response.statusCode} - ${response.body}');
     }
   }
 

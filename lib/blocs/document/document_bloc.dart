@@ -172,21 +172,24 @@ class DocumentBloc extends Bloc<DocumentEvent, DocumentState> {
 
   Future<void> _onDeleteDocument(DeleteDocument event, Emitter<DocumentState> emit) async {
     try {
+      // Get current documents from state before making the delete request
+      List<Document> currentDocuments = [];
+      if (state is DocumentsLoaded) {
+        currentDocuments = (state as DocumentsLoaded).documents;
+      }
+      
       emit(const DocumentsLoading());
       final result = await _documentRepository.deleteDocument(event.id);
       
-      // Re-fetch the documents if we have a folder ID
-      List<Document>? documents;
-      if (event.folderId != null) {
-        documents = await _documentRepository.getDocuments(
-          folderId: event.folderId
-        );
-      }
+      // Instead of reloading from server, remove the deleted document from current state
+      final updatedDocuments = currentDocuments
+          .where((doc) => doc.id != event.id)
+          .toList();
       
-      // Emit single combined state
+      // Emit optimized state with document removed from local list
       emit(DocumentDeletedWithList(
         deleteResult: result,
-        documents: documents,
+        documents: updatedDocuments,
       ));
       
     } catch (error) {

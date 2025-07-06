@@ -158,6 +158,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   late AuthService _authService;
+  int _refreshCounter = 0; // Add refresh counter to force rebuilds
   
   @override
   void initState() {
@@ -167,13 +168,12 @@ class _MainScreenState extends State<MainScreen> {
       secureStorageService: SecureStorageService(),
     );
   }
-  
-  final List<Widget> _desktopScreens = [
-    const FoldersScreen(),
-    const DocumentsScreen(),
-    const ShareableLinksScreen(),
-    const SettingsScreen(),
-  ];
+
+  void _forceRefresh() {
+    setState(() {
+      _refreshCounter++;
+    });
+  }
   
   final List<String> _screenTitles = [
     'Folders',
@@ -181,6 +181,29 @@ class _MainScreenState extends State<MainScreen> {
     'Shared Links',
     'Settings',
   ];
+  
+  Widget _getScreenByIndex(int index) {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final uniqueKey = '$timestamp-$_refreshCounter'; // Include refresh counter
+    switch (index) {
+      case 0:
+        return FoldersScreen(
+          key: ValueKey('main_folders_$uniqueKey'),
+          onReturnToRoot: _forceRefresh, // Pass refresh callback
+        );
+      case 1:
+        return DocumentsScreen(key: ValueKey('main_documents_$uniqueKey'));
+      case 2:
+        return ShareableLinksScreen(key: ValueKey('main_shared_$uniqueKey'));
+      case 3:
+        return SettingsScreen(key: ValueKey('main_settings_$uniqueKey'));
+      default:
+        return FoldersScreen(
+          key: ValueKey('main_folders_$uniqueKey'),
+          onReturnToRoot: _forceRefresh, // Pass refresh callback
+        );
+    }
+  }
   
   @override
   Widget build(BuildContext context) {
@@ -372,12 +395,22 @@ class _MainScreenState extends State<MainScreen> {
   }
   
   Widget _getSelectedScreen() {
-    return _desktopScreens[_selectedIndex];
+    return _getScreenByIndex(_selectedIndex);
   }
   
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
+    });
+    // Force refresh when switching to folders tab to ensure fresh content
+    if (index == 0) {
+      _forceRefresh();
+    }
+    // Force a rebuild to refresh the screen
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() {});
+      }
     });
   }
   

@@ -8,7 +8,7 @@ import 'package:doc_manager/models/document.dart';
 import 'package:doc_manager/models/folder.dart';
 import 'package:doc_manager/shared/components/responsive_builder.dart';
 import 'package:doc_manager/repository/folder_repository.dart';
-import 'package:doc_manager/widgets/unified_document_viewer.dart';
+import 'package:doc_manager/screens/document_viewer_screen.dart';
 import 'package:doc_manager/shared/network/api_service.dart';
 import 'package:doc_manager/shared/network/api.dart';
 import 'package:flutter/material.dart';
@@ -19,20 +19,25 @@ import 'package:file_picker/file_picker.dart';
 import 'dart:io' if (dart.library.html) 'dart:html' as html;
 import 'dart:io' as io show File;
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:developer' as developer;
+import 'package:path_provider/path_provider.dart';
 import '../shared/utils/file_utils.dart';
+import '../shared/utils/web_download_helper_stub.dart'
+    if (dart.library.html) '../shared/utils/web_download_helper.dart';
 import 'package:path/path.dart' as p;
 
 class FoldersScreen extends StatefulWidget {
   final String? parentFolderId;
+  final VoidCallback? onReturnToRoot; // Add callback for root return
   
-  const FoldersScreen({super.key, this.parentFolderId});
+  const FoldersScreen({super.key, this.parentFolderId, this.onReturnToRoot});
 
   @override
   State<FoldersScreen> createState() => _FoldersScreenState();
 }
 
-class _FoldersScreenState extends State<FoldersScreen> {
+class _FoldersScreenState extends State<FoldersScreen> with WidgetsBindingObserver {
   late FolderBloc _folderBloc;
   late DocumentBloc _documentBloc;
   final _folderNameController = TextEditingController();
@@ -65,6 +70,7 @@ class _FoldersScreenState extends State<FoldersScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _folderBloc = context.read<FolderBloc>();
     _documentBloc = context.read<DocumentBloc>();
     
@@ -72,10 +78,50 @@ class _FoldersScreenState extends State<FoldersScreen> {
     _filteredFolders = _folders;
     _filteredDocuments = _documents;
     
+    _resetAndReloadContent();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _folderNameController.dispose();
+    _documentNameController.dispose();
+    _searchController.dispose();
+    _searchDebouncer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // Refresh content when app becomes active
+    if (state == AppLifecycleState.resumed && mounted) {
+      _resetAndReloadContent();
+    }
+  }
+
+  void _resetAndReloadContent() {
+    // Reset all state variables
+    setState(() {
+      _folders = [];
+      _documents = [];
+      _filteredFolders = [];
+      _filteredDocuments = [];
+      _isLoadingFolders = false;
+      _isLoadingDocuments = false;
+      _folderPath = [];
+      _searchController.clear();
+      _selectedFile = null;
+      _selectedFileName = null;
+      _selectedFileBytes = null;
+      _isUploadingDocument = false;
+    });
+    
+    // Load fresh content
     _loadContent();
     _loadFolderPath();
   }
-  
+
   void _loadContent() {
     _loadFolders();
     _loadDocuments();
@@ -608,17 +654,140 @@ class _FoldersScreenState extends State<FoldersScreen> {
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+          TextButton(
             onPressed: () {
-              _documentBloc.add(DeleteDocument(document.id, folderId: widget.parentFolderId));
               Navigator.pop(context);
+              
+              // Delete the document - the BlocListener will handle success/error messages
+              // and the BlocBuilder will automatically refresh the list when the state changes
+              _documentBloc.add(DeleteDocument(document.id, folderId: widget.parentFolderId));
             },
             child: const Text('Delete'),
           ),
         ],
       ),
     );
+  }
+
+  void _downloadDocument(Document document) async {
+    try {
+      // Show loading indicator
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              SizedBox(width: 8),
+              Text('Downloading document...'),
+            ],
+          ),
+          duration: Duration(seconds: 3),
+        ),
+      );
+
+      // Download the document using the API service
+      final apiService = ApiService();
+      final downloadUrl = '${API.baseUrl}/manager/document/${document.id}/download/';
+      
+      // Ensure filename has proper extension
+      final fileName = _ensureFileExtension(document.name, document.type);
+      
+      if (kIsWeb) {
+        // For web, programmatically trigger download
+        try {
+          final fileBytes = await apiService.downloadFile(downloadUrl);
+          
+          // Use the web download helper with proper filename
+          WebDownloadHelper.downloadFile(Uint8List.fromList(fileBytes), fileName);
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Document downloaded successfully!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        } catch (e) {
+          // Show error message if download fails
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Download failed: ${e.toString()}'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      } else {
+        // For mobile/desktop, download and save to documents directory
+        final fileBytes = await apiService.downloadFile(downloadUrl);
+        
+        final directory = await getApplicationDocumentsDirectory();
+        final filePath = '${directory.path}/$fileName';
+        final file = io.File(filePath);
+        await file.writeAsBytes(fileBytes);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Document downloaded to: $filePath'),
+              backgroundColor: Colors.green,
+              action: SnackBarAction(
+                label: 'Open Folder',
+                onPressed: () {
+                  // TODO: Open file manager to show the file
+                },
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error downloading document: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // Helper method to ensure filename has proper extension
+  String _ensureFileExtension(String fileName, DocumentType documentType) {
+    final extension = _getFileExtension(documentType);
+    
+    // Check if filename already has the correct extension
+    if (fileName.toLowerCase().endsWith(extension.toLowerCase())) {
+      return fileName;
+    }
+    
+    // Remove any existing extension and add the correct one
+    final nameWithoutExtension = fileName.contains('.')
+        ? fileName.substring(0, fileName.lastIndexOf('.'))
+        : fileName;
+    
+    return '$nameWithoutExtension$extension';
+  }
+
+  // Helper method to get file extension from document type
+  String _getFileExtension(DocumentType documentType) {
+    switch (documentType) {
+      case DocumentType.pdf:
+        return '.pdf';
+      case DocumentType.csv:
+        return '.csv';
+      case DocumentType.docx:
+        return '.docx';
+      case DocumentType.unsupported:
+        return '.txt';
+    }
   }
 
   void _uploadFolder() {
@@ -645,123 +814,188 @@ class _FoldersScreenState extends State<FoldersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.parentFolderId == null ? 'My Files' : 'Folder Contents'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () {
-              showSearch(
-                context: context,
-                delegate: FolderSearchDelegate(folderBloc: _folderBloc),
-              );
-            },
-          ),
-          IconButton(
-            icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
-            onPressed: () {
-              setState(() {
-                _isGridView = !_isGridView;
-              });
-            },
-            tooltip: _isGridView ? 'Switch to List View' : 'Switch to Grid View',
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadContent,
-          ),
-        ],
-      ),
-      body: MultiBlocListener(
-        listeners: [
-          BlocListener<FolderBloc, FolderState>(
-            listener: (context, state) {
-              if (state is FolderError) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Folder Error: ${state.error}')),
+    return PopScope(
+      canPop: widget.parentFolderId == null, // Allow normal pop at root level
+      onPopInvoked: (didPop) {
+        if (didPop) return;
+        if (widget.parentFolderId != null) {
+          _handleBackNavigation();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(widget.parentFolderId == null ? 'My Files' : 'Folder Contents'),
+          leading: widget.parentFolderId != null
+              ? IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: _handleBackNavigation,
+                )
+              : null,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.search),
+              onPressed: () {
+                showSearch(
+                  context: context,
+                  delegate: FolderSearchDelegate(folderBloc: _folderBloc),
                 );
-              } else if (state is FolderOperationSuccess) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(state.message)),
-                );
-                _loadContent(); // Reload when folder operations complete
-                _loadFolderPath(); // Reload folder path
-              } else if (state is FoldersLoaded) {
+              },
+            ),
+            IconButton(
+              icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
+              onPressed: () {
                 setState(() {
-                  _folders = state.folders;
-                  _isLoadingFolders = false;
+                  _isGridView = !_isGridView;
                 });
-                _filterContent(_searchController.text);
-              }
-            },
-          ),
-          BlocListener<DocumentBloc, DocumentState>(
-            listener: (context, state) {
-              if (state is DocumentError) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Document Error: ${state.error}')),
-                );
-              } else if (state is DocumentOperationSuccess) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(state.message)),
-                );
-                _loadContent(); // Reload when document operations complete
-              } else if (state is DocumentCreated) {
-                // Navigate to the newly created document
-                Navigator.push(
-                  context, 
-                  MaterialPageRoute(
-                    builder: (context) => UnifiedDocumentViewer(
-                      document: state.document,
-                      onDocumentUpdated: () {
-                        _loadContent();
-                      },
-                    ),
-                  ),
-                ).then((_) => _loadContent()); // Reload on navigation back
-              } else if (state is DocumentsLoaded) {
-                setState(() {
-                  _documents = state.documents;
-                  _isLoadingDocuments = false;
-                });
-                _filterContent(_searchController.text);
-              }
-            },
-          ),
-        ],
-        child: Column(
-          children: [
-            _buildBreadcrumbNavigation(),
-            _buildSearchBar(),
-            Expanded(child: _buildRefreshableContent()),
+              },
+              tooltip: _isGridView ? 'Switch to List View' : 'Switch to Grid View',
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _loadContent,
+            ),
           ],
         ),
-      ),
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          FloatingActionButton(
-            heroTag: 'createDocument',
-            onPressed: _createDocument,
-            child: const Icon(Icons.add),
-            backgroundColor: Colors.blue,
+        body: MultiBlocListener(
+          listeners: [
+            BlocListener<FolderBloc, FolderState>(
+              listener: (context, state) {
+                if (state is FolderError) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Folder Error: ${state.error}')),
+                  );
+                } else if (state is FolderOperationSuccess) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(state.message)),
+                  );
+                  _loadContent(); // Reload when folder operations complete
+                  _loadFolderPath(); // Reload folder path
+                } else if (state is FoldersLoaded) {
+                  setState(() {
+                    _folders = state.folders;
+                    _isLoadingFolders = false;
+                  });
+                  _filterContent(_searchController.text);
+                }
+              },
+            ),
+            BlocListener<DocumentBloc, DocumentState>(
+              listener: (context, state) {
+                if (state is DocumentError) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Document Error: ${state.error}')),
+                  );
+                } else if (state is DocumentOperationSuccess) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(state.message)),
+                  );
+                  _loadContent(); // Reload when document operations complete
+                } else if (state is DocumentDeletedWithList) {
+                  // Handle optimized delete success
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Document deleted successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                  // Update local state with optimized document list
+                  setState(() {
+                    _documents = state.documents ?? [];
+                    _isLoadingDocuments = false;
+                  });
+                  _filterContent(_searchController.text);
+                } else if (state is DocumentCreatedWithList) {
+                  // Handle document creation success
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Document created successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                  // Update local state with new document list
+                  setState(() {
+                    _documents = state.documents;
+                    _isLoadingDocuments = false;
+                  });
+                  _filterContent(_searchController.text);
+                  // Navigate to the newly created document
+                  Navigator.push(
+                    context, 
+                    MaterialPageRoute(
+                      builder: (context) => DocumentViewerScreen(
+                        document: state.document,
+                      ),
+                    ),
+                  ).then((_) => _loadContent()); // Reload on navigation back
+                } else if (state is DocumentUpdatedWithList) {
+                  // Handle document update success
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Document updated successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                  // Update local state with updated document list
+                  if (state.documents != null) {
+                    setState(() {
+                      _documents = state.documents!;
+                      _isLoadingDocuments = false;
+                    });
+                    _filterContent(_searchController.text);
+                  }
+                } else if (state is DocumentCreated) {
+                  // Navigate to the newly created document (fallback for old state)
+                  Navigator.push(
+                    context, 
+                    MaterialPageRoute(
+                      builder: (context) => DocumentViewerScreen(
+                        document: state.document,
+                      ),
+                    ),
+                  ).then((_) => _loadContent()); // Reload on navigation back
+                } else if (state is DocumentsLoaded) {
+                  setState(() {
+                    _documents = state.documents;
+                    _isLoadingDocuments = false;
+                  });
+                  _filterContent(_searchController.text);
+                }
+              },
+            ),
+          ],
+          child: Column(
+            children: [
+              _buildBreadcrumbNavigation(),
+              _buildSearchBar(),
+              Expanded(child: _buildRefreshableContent()),
+            ],
           ),
-          const SizedBox(height: 16),
-          FloatingActionButton(
-            heroTag: 'uploadFolder',
-            onPressed: _uploadFolder,
-            child: const Icon(Icons.upload),
-            backgroundColor: Colors.green,
-          ),
-          const SizedBox(height: 16),
-          FloatingActionButton(
-            heroTag: 'createFolder',
-            onPressed: _createFolder,
-            child: const Icon(Icons.create_new_folder),
-            backgroundColor: Colors.amber,
-          ),
-        ],
+        ),
+        floatingActionButton: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FloatingActionButton(
+              heroTag: 'createDocument',
+              onPressed: _createDocument,
+              child: const Icon(Icons.add),
+              backgroundColor: Colors.blue,
+            ),
+            const SizedBox(height: 16),
+            FloatingActionButton(
+              heroTag: 'uploadFolder',
+              onPressed: _uploadFolder,
+              child: const Icon(Icons.upload),
+              backgroundColor: Colors.green,
+            ),
+            const SizedBox(height: 16),
+            FloatingActionButton(
+              heroTag: 'createFolder',
+              onPressed: _createFolder,
+              child: const Icon(Icons.create_new_folder),
+              backgroundColor: Colors.amber,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -774,12 +1008,7 @@ class _FoldersScreenState extends State<FoldersScreen> {
       InkWell(
         onTap: () {
           if (widget.parentFolderId != null) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const FoldersScreen(),
-              ),
-            );
+            _navigateToFolder(null); // Navigate to root
           }
         },
         child: Padding(
@@ -838,12 +1067,7 @@ class _FoldersScreenState extends State<FoldersScreen> {
       breadcrumbs.add(
         InkWell(
           onTap: isLast ? null : () {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (context) => FoldersScreen(parentFolderId: folder.id),
-              ),
-            );
+            _navigateToFolder(folder.id);
           },
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
@@ -1254,12 +1478,7 @@ class _FoldersScreenState extends State<FoldersScreen> {
       elevation: 2,
       child: InkWell(
         onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => FoldersScreen(parentFolderId: folder.id),
-            ),
-          ).then((_) => _loadContent()); // Reload on navigation back
+          _navigateToFolder(folder.id);
         },
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1324,12 +1543,7 @@ class _FoldersScreenState extends State<FoldersScreen> {
         onPressed: () => _deleteFolder(folder),
       ),
       onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => FoldersScreen(parentFolderId: folder.id),
-          ),
-        ).then((_) => _loadContent()); // Reload on navigation back
+        _navigateToFolder(folder.id);
       },
     );
   }
@@ -1343,11 +1557,8 @@ class _FoldersScreenState extends State<FoldersScreen> {
           Navigator.push(
             context, 
             MaterialPageRoute(
-              builder: (context) => UnifiedDocumentViewer(
+              builder: (context) => DocumentViewerScreen(
                 document: document,
-                onDocumentUpdated: () {
-                  _loadContent();
-                },
               ),
             ),
           ).then((_) => _loadContent()); // Reload on navigation back
@@ -1440,11 +1651,8 @@ class _FoldersScreenState extends State<FoldersScreen> {
                                   Navigator.push(
                                     context, 
                                     MaterialPageRoute(
-                                      builder: (context) => UnifiedDocumentViewer(
+                                      builder: (context) => DocumentViewerScreen(
                                         document: document,
-                                        onDocumentUpdated: () {
-                                          _loadContent();
-                                        },
                                       ),
                                     ),
                                   ).then((_) => _loadContent());
@@ -1459,6 +1667,17 @@ class _FoldersScreenState extends State<FoldersScreen> {
                                 padding: EdgeInsets.zero,
                                 onPressed: () {
                                   _shareDocument(document);
+                                },
+                              ),
+                              IconButton(
+                                icon: Icon(Icons.download, size: iconButtonSize),
+                                constraints: BoxConstraints(
+                                  maxHeight: buttonSize,
+                                  maxWidth: buttonSize,
+                                ),
+                                padding: EdgeInsets.zero,
+                                onPressed: () {
+                                  _downloadDocument(document);
                                 },
                               ),
                               IconButton(
@@ -1558,20 +1777,23 @@ class _FoldersScreenState extends State<FoldersScreen> {
               Navigator.push(
                 context, 
                 MaterialPageRoute(
-                  builder: (context) => UnifiedDocumentViewer(
+                  builder: (context) => DocumentViewerScreen(
                     document: document,
-                    onDocumentUpdated: () {
-                      _loadContent();
-                    },
                   ),
                 ),
-              ).then((_) => _loadContent()); // Reload on navigation back
+              ).then((_) => _loadContent());
             },
           ),
           IconButton(
             icon: const Icon(Icons.share),
             onPressed: () {
               _shareDocument(document);
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.download),
+            onPressed: () {
+              _downloadDocument(document);
             },
           ),
           IconButton(
@@ -1586,14 +1808,11 @@ class _FoldersScreenState extends State<FoldersScreen> {
         Navigator.push(
           context, 
           MaterialPageRoute(
-            builder: (context) => UnifiedDocumentViewer(
+            builder: (context) => DocumentViewerScreen(
               document: document,
-              onDocumentUpdated: () {
-                _loadContent();
-              },
             ),
           ),
-        ).then((_) => _loadContent()); // Reload on navigation back
+        ).then((_) => _loadContent());
       },
     );
   }
@@ -1628,13 +1847,59 @@ class _FoldersScreenState extends State<FoldersScreen> {
     _filterContent('');
   }
 
-  @override
-  void dispose() {
-    _folderNameController.dispose();
-    _documentNameController.dispose();
-    _searchController.dispose();
-    _searchDebouncer?.cancel();
-    super.dispose();
+  void _handleBackNavigation() {
+    if (widget.parentFolderId == null) {
+      // We're at the root, PopScope will handle the exit
+      return;
+    }
+
+    // Find the parent folder ID from the folder path
+    String? parentFolderId;
+    if (_folderPath.isNotEmpty) {
+      // Get the parent of the current folder
+      final currentFolderIndex = _folderPath.length - 1;
+      if (currentFolderIndex > 0) {
+        // Navigate to the parent folder
+        parentFolderId = _folderPath[currentFolderIndex - 1].id;
+      } else {
+        // Navigate to root
+        parentFolderId = null;
+      }
+    } else {
+      // No folder path available, navigate to root
+      parentFolderId = null;
+    }
+
+    _navigateToFolder(parentFolderId);
+  }
+
+  void _navigateToFolder(String? folderId) {
+    if (folderId == null) {
+      // Navigate to root - pop back to MainScreen instead of creating new stack
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      // Trigger refresh after navigation is complete
+      if (widget.onReturnToRoot != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            widget.onReturnToRoot!();
+          }
+        });
+      }
+      return;
+    }
+    
+    // For non-root folders, use pushAndRemoveUntil to clear the stack
+    // Create a new instance to ensure state is reset
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (context) => FoldersScreen(
+          parentFolderId: folderId,
+          key: ValueKey('folder_$folderId'), // Unique key to ensure new instance
+          onReturnToRoot: widget.onReturnToRoot, // Pass the callback down
+        ),
+      ),
+      (route) => route.isFirst, // Keep the first route (MainScreen)
+    );
   }
 }
 
@@ -1686,13 +1951,22 @@ class FolderSearchDelegate extends SearchDelegate<String> {
                 leading: const Icon(Icons.folder),
                 title: Text(folder.name),
                 onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => FoldersScreen(parentFolderId: folder.id),
-                    ),
-                  );
                   close(context, folder.id);
+                  // Navigate to the folder using the new method
+                  if (folder.id == null) {
+                    Navigator.of(context).popUntil((route) => route.isFirst);
+                  } else {
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(
+                        builder: (context) => FoldersScreen(
+                          parentFolderId: folder.id,
+                          key: ValueKey('folder_${folder.id}'), // Unique key to ensure new instance
+                          onReturnToRoot: null, // No callback for search results
+                        ),
+                      ),
+                      (route) => route.isFirst, // Keep the first route (MainScreen)
+                    );
+                  }
                 },
               );
             },
