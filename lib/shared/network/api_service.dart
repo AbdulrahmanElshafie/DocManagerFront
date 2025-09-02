@@ -669,4 +669,24 @@ class ApiService {
       return 'pdf'; // Default
     }
   }
+
+  Future<List<int>> convertDocxToPdf(String documentId) async {
+    AppLogger.debug('CONVERT DOCX TO PDF REQUEST: $documentId', name: 'ApiService');
+    final headers = await _getHeaders();
+    
+    final url = '${API.baseUrl}/manager/document/$documentId/convert_docx_to_pdf/';
+    
+    final response = await http.get(
+      Uri.parse(url), 
+      headers: headers,
+    );
+    
+    AppLogger.debug('CONVERT DOCX RESPONSE (${response.statusCode}): ${response.bodyBytes.length} bytes', name: 'ApiService');
+
+    if (response.statusCode == 200) {
+      return response.bodyBytes;
+    } else {
+      throw Exception('Failed to convert DOCX to PDF: ${response.statusCode} - ${response.body}');
+    }
+  }
 }

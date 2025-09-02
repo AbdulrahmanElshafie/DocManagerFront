@@ -1,0 +1,9 @@
+version: "3.8"
+
+services:
+  doc_manager_web_app:
+    build: .
+    container_name: doc_manager_web_app
+    ports:
+      - "8888:80"     # <- host:container (host 8888 -> container 80)
+    restart: always
