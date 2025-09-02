@@ -43,12 +43,7 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
       case DocumentType.csv:
         return CsvScreen(url: url);
       case DocumentType.docx:
-        return DocxScreen(
-          url: url,
-          name: widget.document.name.endsWith('.docx')
-              ? widget.document.name
-              : '${widget.document.name}.docx',
-        );
+        return DocxScreen(document: widget.document);
       default:
         return _errorState("Unsupported format");
     }

@@ -1,15 +1,17 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:docx_viewer/docx_viewer.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:http/http.dart' as http;
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:path_provider/path_provider.dart';
+import '../models/document.dart';
+import '../shared/network/api_service.dart';
 
 class DocxScreen extends StatefulWidget {
-  final String url;
-  final String name;
-  const DocxScreen({Key? key, required this.url, required this.name})
+  final Document document;
+  const DocxScreen({Key? key, required this.document})
       : super(key: key);
 
   @override
@@ -17,127 +19,126 @@ class DocxScreen extends StatefulWidget {
 }
 
 class _DocxScreenState extends State<DocxScreen> {
-  File? _file;
+  late PdfViewerController _pdfController;
+  String? _pdfBlobUrl;
   bool _loading = true, _error = false;
   String _errorMessage = '';
+  final ApiService _apiService = ApiService();
 
   @override
   void initState() {
     super.initState();
-    _downloadAndSave();
+    _pdfController = PdfViewerController();
+    _convertDocxToPdf();
   }
 
-  Future<void> _downloadAndSave() async {
-    // ── on web, skip download+temp‐file and just open externally ──
-    if (kIsWeb) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _openExternally());
-      return;
-    }
-    
+  @override
+  void dispose() {
+    _pdfController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _convertDocxToPdf() async {
     try {
-      final res = await http.get(Uri.parse(widget.url));
-      if (res.statusCode != 200) {
-        throw Exception('HTTP ${res.statusCode}: ${res.reasonPhrase}');
+      setState(() {
+        _loading = true;
+        _error = false;
+        _errorMessage = '';
+        _pdfBlobUrl = null;
+      });
+
+      // Call the conversion API
+      final pdfBytes = await _apiService.convertDocxToPdf(widget.document.id);
+      
+      // Create blob URL for the PDF
+      if (kIsWeb) {
+        final blob = Uint8List.fromList(pdfBytes);
+        // For web, we'll create a data URL
+        final base64String = base64Encode(blob);
+        _pdfBlobUrl = 'data:application/pdf;base64,$base64String';
+      } else {
+        // For mobile/desktop, create a temporary file
+        final tempFile = File('${(await getTemporaryDirectory()).path}/converted_${widget.document.id}.pdf');
+        await tempFile.writeAsBytes(pdfBytes);
+        _pdfBlobUrl = tempFile.path;
       }
-      final dir = await getTemporaryDirectory();
-      final f = File('${dir.path}/${widget.name}');
-      await f.writeAsBytes(res.bodyBytes, flush: true);
-      setState(() => _file = f);
+
+      setState(() {
+        _loading = false;
+      });
     } catch (e) {
       setState(() {
+        _loading = false;
         _error = true;
         _errorMessage = e.toString();
       });
-    } finally {
-      setState(() => _loading = false);
     }
   }
 
   Future<void> _openExternally() async {
     try {
-      final uri = Uri.parse(widget.url);
+      final url = widget.document.getAbsoluteFileUrl();
+      if (url == null) {
+        _showErrorSnackBar('No URL available for this document');
+        return;
+      }
+      
+      final uri = Uri.parse(url);
       if (!await canLaunchUrl(uri)) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(kIsWeb 
-                ? 'Could not open document in browser' 
-                : 'Could not launch external viewer'),
-            ),
-          );
-        }
+        _showErrorSnackBar(kIsWeb 
+          ? 'Could not open document in browser' 
+          : 'Could not launch external viewer');
         return;
       }
       await launchUrl(uri, mode: kIsWeb 
           ? LaunchMode.platformDefault 
           : LaunchMode.externalApplication);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(kIsWeb 
-                ? 'Failed to open document in browser: ${e.toString()}' 
-                : 'Failed to launch external viewer: ${e.toString()}'),
-          ),
-        );
-      }
+      _showErrorSnackBar(kIsWeb 
+          ? 'Failed to open document in browser: ${e.toString()}' 
+          : 'Failed to launch external viewer: ${e.toString()}');
     }
   }
 
   Future<void> _retry() async {
-    if (kIsWeb) {
-      // On web, retry means trying to open externally again
-      await _openExternally();
-      return;
+    await _convertDocxToPdf();
+  }
+
+  void _showErrorSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
     }
-    
-    setState(() {
-      _loading = true;
-      _error = false;
-      _errorMessage = '';
-      _file = null;
-    });
-    await _downloadAndSave();
   }
 
   @override
   Widget build(BuildContext context) {
-    // On web we never download a file; we already kicked off `openExternally`
-    if (kIsWeb) {
-      return Scaffold(
-        appBar: AppBar(title: Text(widget.name)),
-        body: const Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Opening document in browser...'),
-            ],
-          ),
-        ),
-      );
-    }
-    
+    // Loading state
     if (_loading) {
       return Scaffold(
-        appBar: AppBar(title: Text(widget.name)),
+        appBar: AppBar(title: Text(widget.document.name)),
         body: const Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               CircularProgressIndicator(),
               SizedBox(height: 16),
-              Text('Loading document...'),
+              Text('Converting document to PDF...'),
             ],
           ),
         ),
       );
     }
     
-    if (_error || _file == null) {
+    // Error state
+    if (_error || _pdfBlobUrl == null) {
       return Scaffold(
-        appBar: AppBar(title: Text(widget.name)),
+        appBar: AppBar(title: Text(widget.document.name)),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -145,15 +146,18 @@ class _DocxScreenState extends State<DocxScreen> {
               const Icon(Icons.error_outline, size: 64, color: Colors.red),
               const SizedBox(height: 16),
               Text(
-                'Failed to load ${widget.name}',
+                'Failed to convert ${widget.document.name}',
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 8),
               if (_errorMessage.isNotEmpty)
-                Text(
-                  _errorMessage,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                  textAlign: TextAlign.center,
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Text(
+                    _errorMessage,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    textAlign: TextAlign.center,
+                  ),
                 ),
               const SizedBox(height: 16),
               Row(
@@ -166,7 +170,7 @@ class _DocxScreenState extends State<DocxScreen> {
                   const SizedBox(width: 16),
                   ElevatedButton(
                     onPressed: _openExternally,
-                    child: const Text('Open in Browser'),
+                    child: const Text('Open Original'),
                   ),
                 ],
               ),
@@ -176,23 +180,79 @@ class _DocxScreenState extends State<DocxScreen> {
       );
     }
     
+    // Success state - show PDF viewer
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.name),
+        title: Text(widget.document.name),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: 'Reload document',
+            tooltip: 'Reconvert document',
             onPressed: _retry,
           ),
           IconButton(
             icon: const Icon(Icons.open_in_new),
-            tooltip: 'Open in external app',
+            tooltip: 'Open original document',
             onPressed: _openExternally,
           ),
         ],
       ),
-      body: DocxView(filePath: _file!.path),
+      body: Column(
+        children: [
+          // PDF Toolbar (similar to document_viewer_screen.dart)
+          Container(
+            padding: const EdgeInsets.all(8.0),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              border: Border(
+                bottom: BorderSide(
+                  color: Theme.of(context).dividerColor,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                IconButton(
+                  onPressed: () => _pdfController.zoomLevel = _pdfController.zoomLevel * 0.8,
+                  icon: const Icon(Icons.zoom_out),
+                  tooltip: 'Zoom Out',
+                ),
+                IconButton(
+                  onPressed: () => _pdfController.zoomLevel = _pdfController.zoomLevel * 1.2,
+                  icon: const Icon(Icons.zoom_in),
+                  tooltip: 'Zoom In',
+                ),
+                const Spacer(),
+                const Text('Converted from DOCX', 
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ],
+            ),
+          ),
+          
+          // PDF Viewer
+          Expanded(
+            child: kIsWeb 
+              ? SfPdfViewer.memory(
+                  base64Decode(_pdfBlobUrl!.split(',')[1]), // Remove data:application/pdf;base64, prefix
+                  controller: _pdfController,
+                  canShowScrollStatus: true,
+                  canShowScrollHead: true,
+                  canShowPaginationDialog: true,
+                  enableDoubleTapZooming: true,
+                  enableTextSelection: true,
+                )
+              : SfPdfViewer.file(
+                  File(_pdfBlobUrl!),
+                  controller: _pdfController,
+                  canShowScrollStatus: true,
+                  canShowScrollHead: true,
+                  canShowPaginationDialog: true,
+                  enableDoubleTapZooming: true,
+                  enableTextSelection: true,
+                ),
+          ),
+        ],
+      ),
     );
   }
 } 

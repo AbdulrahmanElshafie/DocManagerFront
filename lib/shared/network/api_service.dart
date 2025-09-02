@@ -669,4 +669,32 @@ class ApiService {
       return 'pdf'; // Default
     }
   }
+
+  // Convert DOCX document to PDF
+  Future<List<int>> convertDocxToPdf(String documentId) async {
+    AppLogger.debug('CONVERT DOCX TO PDF REQUEST: document ID $documentId', name: 'ApiService');
+    final headers = await _getHeaders();
+    
+    // Add headers to explicitly request binary data (PDF)
+    final downloadHeaders = {
+      ...headers,
+      'Accept': 'application/pdf, application/octet-stream, */*',
+    };
+    
+    final url = '${API.baseUrl}/manager/document/$documentId/convert/pdf/';
+    
+    final response = await http.get(
+      Uri.parse(url), 
+      headers: downloadHeaders,
+    );
+    
+    AppLogger.debug('CONVERT DOCX TO PDF RESPONSE (${response.statusCode}): ${response.bodyBytes.length} bytes', name: 'ApiService');
+
+    if (response.statusCode == 200) {
+      // Return the raw PDF bytes
+      return response.bodyBytes;
+    } else {
+      throw Exception('Failed to convert DOCX to PDF: ${response.statusCode} - ${response.body}');
+    }
+  }
 }
