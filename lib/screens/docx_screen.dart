@@ -15,7 +15,7 @@ class DocxScreen extends StatefulWidget {
       : super(key: key);
 
   @override
-  _DocxScreenState createState() => _DocxScreenState();
+  State<DocxScreen> createState() => _DocxScreenState();
 }
 
 class _DocxScreenState extends State<DocxScreen> {
