@@ -17,6 +17,7 @@ class API {
   
   // Document Endpoints
   static const String document = '/manager/document/';
+  static const String documentConvertDocx = '/manager/document/'; // Will append {id}/convert_docx_to_pdf/
   static const String documentVersion = '/manager/document/revision/';
   
   // Folder Endpoints
